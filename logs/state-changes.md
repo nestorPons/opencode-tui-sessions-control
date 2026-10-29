@@ -55,3 +55,8 @@
 - Test `datePreset` ampliado (sin filtro, mes, rango y días).
 - Ayuda, README y spec actualizados.
 - `make test` y `make vet` OK.
+
+## 2026-10-29 — Publicación del repositorio
+- `.gitignore` ampliado: binarios, bases SQLite, exportaciones, `.vscode/sftp.json`, `.env`, claves y logs.
+- `git init`, commit inicial y push a `github.com/nestorPons/opencode-tui-sessions-control` (público).
+- `make test` y `make vet` OK.
