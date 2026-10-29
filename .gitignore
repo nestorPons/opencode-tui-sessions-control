@@ -1,0 +1,44 @@
+# Binarios y builds
+bin/
+*.exe
+*.out
+
+# Bases de datos locales
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Exportaciones
+exports/
+*.xlsx
+*.pdf
+*.csv
+
+# Configuración local con credenciales
+.vscode/sftp.json
+.vscode/*.local.json
+.env
+.env.*
+*.pem
+*.key
+*.p12
+credentials*
+secrets*
+
+# Logs de ejecución (se conserva logs/state-changes.md)
+logs/*.log
+logs/*.txt
+*.log
+
+# Sistema y editores
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Go
+*.test
+coverage.out
