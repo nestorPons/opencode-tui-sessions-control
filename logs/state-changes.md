@@ -60,3 +60,22 @@
 - `.gitignore` ampliado: binarios, bases SQLite, exportaciones, `.vscode/sftp.json`, `.env`, claves y logs.
 - `git init`, commit inicial y push a `github.com/nestorPons/opencode-tui-sessions-control` (público).
 - `make test` y `make vet` OK.
+
+## 2026-11-06 — Soporte del esquema V2 de opencode
+- Causa: opencode migró a `session_v2`/`session_message`; el sync solo leía `session`/`message`, congelado a 2026-10-29.
+- `internal/store/store.go`: detección de tablas, sync V2 preferente y fallback legado para IDs ausentes.
+- `session_message.type` como rol; se ignoran eventos `idle`, `compaction` y `agent-switched`.
+- `internal/store/store_test.go`: test de sync V2, títulos nulos, eventos ignorados y fallback legado.
+- `docs/spec.md`, `docs/AGENTS.md` actualizados.
+- Sync real: 277 sesiones, 290 tramos (2026-09-05 → 2026-11-06).
+- `make test` y `make vet` OK.
+
+## 2026-11-09 — Instaladores y paquetes Linux
+- `packaging/install.sh`: instalador universal (release, checksum, `--user`, `--prefix`, `--from-source`, `--uninstall`).
+- `packaging/nfpm.yaml`: paquetes `deb`, `rpm`, `apk` y `archlinux`.
+- `packaging/PKGBUILD`: receta Arch/AUR compilando desde el tag.
+- `Makefile`: `dist` (tarballs amd64/arm64/armv7/386 + `checksums.txt`), `packages`, `release`, `deb|rpm|apk|archlinux`, `packaging-help`; versión por tag y `-X main.version`.
+- Etiquetas nativas por distro: `armhf`, `armv7hl`, `armv7h`, `i386/i686/x86`.
+- `README.md` y `packaging/README.md`: instalación por distro.
+- `.gitignore`: `dist/`.
+- Verificado: 4 tarballs + checksums, 16 paquetes (4 distros × 4 arqs), binarios estáticos, `install.sh --from-source` y `--uninstall`; `make test`/`make vet` OK.

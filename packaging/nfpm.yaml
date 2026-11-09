@@ -1,0 +1,24 @@
+name: sessions-control
+arch: ${PKG_ARCH}
+platform: linux
+version: ${PKG_VERSION}
+section: utils
+priority: optional
+maintainer: Nestor Pons
+vendor: Nestor Pons
+homepage: https://github.com/nestorPons/opencode-tui-sessions-control
+description: |
+  TUI para auditar el tiempo y los tokens de tus sesiones de opencode.
+  Lee opencode.db en modo solo lectura, permite filtrar y editar tramos
+  y exporta las vistas a Excel y PDF.
+contents:
+  - src: ${BINARY}
+    dst: /usr/bin/sessions-control
+    file_info:
+      mode: 0755
+  - src: README.md
+    dst: /usr/share/doc/sessions-control/README.md
+  - src: docs/spec.md
+    dst: /usr/share/doc/sessions-control/spec.md
+  - src: docs/AGENTS.md
+    dst: /usr/share/doc/sessions-control/AGENTS.md

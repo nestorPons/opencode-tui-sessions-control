@@ -20,11 +20,15 @@
 - Multi-fuente (una única BD de opencode por ejecución).
 
 ## 4. Fuente de datos (opencode.db)
-- Tablas usadas: `session`, `message`.
-- Campos:
+- Esquema preferente (opencode V2): `session_v2`, `session_message`.
+  - `session_v2.id`, `session_v2.directory`, `session_v2.title`, `session_v2.time_created`, `session_v2.time_updated`.
+  - `session_message.session_id`, `session_message.type`, `session_message.time_created`, `session_message.data` (JSON).
+  - `type` actúa como rol (`user`, `assistant`); `idle`, `compaction` y `agent-switched` son eventos, no mensajes.
+- Esquema legado (fallback): `session`, `message`.
   - `session.id`, `session.directory`, `session.title`, `session.time_created`, `session.time_updated`.
-  - `message.time_created`, `message.data` (JSON).
-- JSON de `message.data`:
+  - `message.time_created`, `message.data` (JSON); el rol viene en `data.role`.
+- Si existen ambos esquemas se usa V2 y del legado solo las sesiones ausentes en `session_v2`.
+- JSON de `data`:
   - `role`, `cost`.
   - `tokens.{input,output,reasoning,cache.read,cache.write}`.
   - `time.{created,completed}`.
@@ -49,7 +53,7 @@ meta(key, value)  -- source, synced_at
 - Tramo: actividad de una sesión dentro de un día local (`YYYY-MM-DD`).
 - `start` = mínimo `time.created` de los mensajes del día.
 - `end` = máximo `time.completed` (fallback `time.created`).
-- Tokens y coste: suma de mensajes con `role=assistant`.
+- Tokens y coste: suma de mensajes `assistant` (en V2, `session_message.type='assistant'`).
 - Sesión sin mensajes: un tramo con `time_created`..`time_updated`.
 - `worked`: suma de duraciones de los tramos (solapes contados).
 - `unique`: unión de intervalos [start,end] del conjunto mostrado.

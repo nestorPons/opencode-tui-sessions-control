@@ -146,6 +146,21 @@ type dayBucket struct {
 	cost   float64
 }
 
+type sessionInfo struct {
+	dir, title   string
+	created      int64
+	updated      int64
+	days         map[string]*dayBucket
+	messageCount int
+}
+
+// v2EventTypes are session_message rows that are lifecycle events, not messages.
+var v2EventTypes = map[string]bool{
+	"idle":           true,
+	"compaction":     true,
+	"agent-switched": true,
+}
+
 // Sync rebuilds session_day from an opencode SQLite database.
 func (s *Store) Sync(source string) (Stats, error) {
 	src, err := os.Stat(source)
@@ -164,92 +179,39 @@ func (s *Store) Sync(source string) (Stats, error) {
 		return Stats{}, fmt.Errorf("ping source: %w", err)
 	}
 
-	rows, err := srcDB.Query(`
-		SELECT s.id, s.directory, s.title, s.time_created, s.time_updated,
-		       m.time_created, m.data
-		FROM session s
-		LEFT JOIN message m ON m.session_id = s.id
-		ORDER BY s.id, m.time_created, m.id`)
-	if err != nil {
-		return Stats{}, fmt.Errorf("query source: %w", err)
-	}
-	defer rows.Close()
-
-	type sessionInfo struct {
-		dir, title   string
-		created      int64
-		updated      int64
-		days         map[string]*dayBucket
-		messageCount int
-	}
 	sessions := map[string]*sessionInfo{}
 	var order []string
 
-	for rows.Next() {
-		var (
-			id, dir, title   string
-			created, updated int64
-			msgCreated       sql.NullInt64
-			data             sql.NullString
-		)
-		if err := rows.Scan(&id, &dir, &title, &created, &updated, &msgCreated, &data); err != nil {
-			return Stats{}, fmt.Errorf("scan source: %w", err)
-		}
-		info, ok := sessions[id]
-		if !ok {
-			info = &sessionInfo{dir: dir, title: title, created: created, updated: updated, days: map[string]*dayBucket{}}
-			sessions[id] = info
-			order = append(order, id)
-		}
-		if !msgCreated.Valid {
-			continue
-		}
-		info.messageCount++
-		start := msgCreated.Int64
-		end := start
-		var tok domain.Tokens
-		var cost float64
-		if data.Valid {
-			var msg rawMessage
-			if err := json.Unmarshal([]byte(data.String), &msg); err == nil {
-				if msg.Time.Completed > 0 {
-					end = msg.Time.Completed
-				}
-				if msg.Time.Created > 0 {
-					start = msg.Time.Created
-				}
-				if msg.Role == "assistant" {
-					tok = domain.Tokens{
-						Input:      msg.Tokens.Input,
-						Output:     msg.Tokens.Output,
-						Reasoning:  msg.Tokens.Reasoning,
-						CacheRead:  msg.Tokens.Cache.Read,
-						CacheWrite: msg.Tokens.Cache.Write,
-					}
-					cost = msg.Cost
-				}
-			}
-		}
-		if end < start {
-			end = start
-		}
-		day := time.UnixMilli(start).Local().Format("2006-01-02")
-		bucket, ok := info.days[day]
-		if !ok {
-			bucket = &dayBucket{start: start, end: end}
-			info.days[day] = bucket
-		}
-		if start < bucket.start {
-			bucket.start = start
-		}
-		if end > bucket.end {
-			bucket.end = end
-		}
-		bucket.tokens = bucket.tokens.Add(tok)
-		bucket.cost += cost
+	v2 := hasTable(srcDB, "session_v2") && hasTable(srcDB, "session_message")
+	legacy := hasTable(srcDB, "session") && hasTable(srcDB, "message")
+	if !v2 && !legacy {
+		return Stats{}, fmt.Errorf("source database %q: no se encontraron tablas de opencode", source)
 	}
-	if err := rows.Err(); err != nil {
-		return Stats{}, fmt.Errorf("iterate source: %w", err)
+
+	if v2 {
+		query := `
+			SELECT s.id, s.directory, COALESCE(s.title, ''), s.time_created, s.time_updated,
+			       m.time_created, m.data, COALESCE(m.type, '')
+			FROM session_v2 s
+			LEFT JOIN session_message m ON m.session_id = s.id
+			ORDER BY s.id, m.time_created, m.id`
+		if err := loadSource(srcDB, query, true, sessions, &order); err != nil {
+			return Stats{}, err
+		}
+	}
+	if legacy {
+		query := `
+			SELECT s.id, s.directory, s.title, s.time_created, s.time_updated,
+			       m.time_created, m.data, ''
+			FROM session s
+			LEFT JOIN message m ON m.session_id = s.id`
+		if v2 {
+			query += ` WHERE s.id NOT IN (SELECT id FROM session_v2)`
+		}
+		query += ` ORDER BY s.id, m.time_created, m.id`
+		if err := loadSource(srcDB, query, false, sessions, &order); err != nil {
+			return Stats{}, err
+		}
 	}
 
 	tx, err := s.db.Begin()
@@ -306,6 +268,98 @@ func (s *Store) Sync(source string) (Stats, error) {
 		Segments:    segments,
 		SourceFound: true,
 	}, nil
+}
+
+func hasTable(db *sql.DB, name string) bool {
+	var n int
+	err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?`, name).Scan(&n)
+	return err == nil && n > 0
+}
+
+// loadSource reads sessions and messages. When roleFromType is true the message
+// role comes from session_message.type (opencode V2), otherwise from the data JSON.
+func loadSource(db *sql.DB, query string, roleFromType bool, sessions map[string]*sessionInfo, order *[]string) error {
+	rows, err := db.Query(query)
+	if err != nil {
+		return fmt.Errorf("query source: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var (
+			id, dir, title   string
+			created, updated int64
+			msgCreated       sql.NullInt64
+			data             sql.NullString
+			msgType          string
+		)
+		if err := rows.Scan(&id, &dir, &title, &created, &updated, &msgCreated, &data, &msgType); err != nil {
+			return fmt.Errorf("scan source: %w", err)
+		}
+		info, ok := sessions[id]
+		if !ok {
+			info = &sessionInfo{dir: dir, title: title, created: created, updated: updated, days: map[string]*dayBucket{}}
+			sessions[id] = info
+			*order = append(*order, id)
+		}
+		if !msgCreated.Valid {
+			continue
+		}
+		if roleFromType && v2EventTypes[msgType] {
+			continue
+		}
+		info.messageCount++
+		start := msgCreated.Int64
+		end := start
+		var tok domain.Tokens
+		var cost float64
+		if data.Valid {
+			var msg rawMessage
+			if err := json.Unmarshal([]byte(data.String), &msg); err == nil {
+				if msg.Time.Completed > 0 {
+					end = msg.Time.Completed
+				}
+				if msg.Time.Created > 0 {
+					start = msg.Time.Created
+				}
+				role := msg.Role
+				if roleFromType {
+					role = msgType
+				}
+				if role == "assistant" {
+					tok = domain.Tokens{
+						Input:      msg.Tokens.Input,
+						Output:     msg.Tokens.Output,
+						Reasoning:  msg.Tokens.Reasoning,
+						CacheRead:  msg.Tokens.Cache.Read,
+						CacheWrite: msg.Tokens.Cache.Write,
+					}
+					cost = msg.Cost
+				}
+			}
+		}
+		if end < start {
+			end = start
+		}
+		day := time.UnixMilli(start).Local().Format("2006-01-02")
+		bucket, ok := info.days[day]
+		if !ok {
+			bucket = &dayBucket{start: start, end: end}
+			info.days[day] = bucket
+		}
+		if start < bucket.start {
+			bucket.start = start
+		}
+		if end > bucket.end {
+			bucket.end = end
+		}
+		bucket.tokens = bucket.tokens.Add(tok)
+		bucket.cost += cost
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate source: %w", err)
+	}
+	return nil
 }
 
 func setMeta(tx *sql.Tx, key, value string) {

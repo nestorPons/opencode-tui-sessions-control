@@ -1,5 +1,6 @@
 # Binarios y builds
 bin/
+dist/
 *.exe
 *.out
 

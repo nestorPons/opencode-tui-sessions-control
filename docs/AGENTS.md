@@ -3,6 +3,7 @@
 ## Contexto
 - Go 1.27 · SQLite (modernc, sin cgo) · Bubble Tea · excelize · fpdf.
 - Fuente remota: `~/.local/share/opencode/opencode.db` (solo lectura).
+- Sync: V2 (`session_v2`/`session_message`) si existe; legado (`session`/`message`) solo para IDs ausentes en V2.
 - BD local: `~/.local/share/sessions-control/sessions.db`.
 - Spec: `docs/spec.md`.
 
@@ -14,6 +15,8 @@ make test       # go test ./...
 make vet        # go vet ./...
 make fmt        # gofmt
 make install    # ~/.local/bin/sessions-control
+make dist       # tarballs linux (amd64/arm64/armv7/386) + checksums
+make packages   # deb, rpm, apk, archlinux (requiere nfpm)
 ```
 
 ## Estructura

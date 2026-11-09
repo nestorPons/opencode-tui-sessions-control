@@ -10,10 +10,32 @@ TUI en Go para auditar el tiempo y los tokens de tus sesiones de opencode.
 - Exportación con totales a Excel y PDF.
 
 ## Instalación
+
+### Instalador universal (cualquier distro)
 ```bash
-cd ~/Proyectos/sessions-control
+curl -fsSL https://raw.githubusercontent.com/nestorPons/opencode-tui-sessions-control/main/packaging/install.sh | bash -s -- --user
+```
+Opciones: `--user` (~/.local/bin), `--prefix DIR`, `--version VER`,
+`--from-source`, `--uninstall`. Ver `packaging/README.md`.
+
+### Paquetes por distro
+```bash
+make dist        # tarballs linux amd64/arm64/armv7/386 + checksums
+make packages    # deb, rpm, apk y archlinux (requiere nfpm)
+```
+
+| Distro | Instalación |
+|---|---|
+| Debian/Ubuntu/Mint | `sudo apt install ./dist/sessions-control_*.deb` |
+| Fedora/RHEL/Rocky | `sudo dnf install ./dist/sessions-control-*.rpm` |
+| openSUSE | `sudo zypper install ./dist/sessions-control-*.rpm` |
+| Alpine | `sudo apk add --allow-untrusted ./dist/sessions-control_*.apk` |
+| Arch/Manjaro | `cd packaging && makepkg -si` |
+
+### Desde el código
+```bash
 make build
-make install        # opcional: ~/.local/bin/sessions-control
+make install        # ~/.local/bin/sessions-control
 ```
 
 ## Uso
