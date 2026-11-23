@@ -9,6 +9,7 @@ VERSION="${SESSIONS_CONTROL_VERSION:-}"
 PREFIX=""
 USER_INSTALL=0
 FROM_SOURCE=0
+LOCAL_DIR=""
 UNINSTALL=0
 NO_VERIFY=0
 FORCE=0
@@ -22,6 +23,7 @@ Opciones:
   -p, --prefix DIR    Directorio de instalación (por defecto: /usr/local/bin)
   -u, --user          Instalar en ~/.local/bin (sin sudo)
       --from-source   Compilar desde el código fuente (requiere Go)
+      --local [DIR]   Compilar e instalar desde un checkout local (por defecto: .)
       --uninstall     Desinstalar el binario instalado
       --no-verify     No verificar el checksum sha256
       --force         Reinstalar aunque ya exista la misma versión
@@ -32,6 +34,7 @@ Ejemplos:
   ./packaging/install.sh --user
   ./packaging/install.sh --version 0.1.0 --prefix /opt/bin
   ./packaging/install.sh --from-source --user
+  ./packaging/install.sh --local .. --user
 EOF
 }
 
@@ -45,6 +48,14 @@ while [ $# -gt 0 ]; do
 		-p|--prefix) PREFIX="${2:?falta el directorio}"; shift 2 ;;
 		-u|--user) USER_INSTALL=1; shift ;;
 		--from-source) FROM_SOURCE=1; shift ;;
+		--local)
+			LOCAL_DIR="."
+			if [ $# -gt 1 ] && [ "${2#-}" = "$2" ]; then
+				LOCAL_DIR="$2"; shift 2
+			else
+				shift
+			fi
+			;;
 		--uninstall) UNINSTALL=1; shift ;;
 		--no-verify) NO_VERIFY=1; shift ;;
 		--force) FORCE=1; shift ;;
@@ -125,7 +136,38 @@ build_from_source() {
 			die "no existe la versión v$VERSION"
 	fi
 	log "compilando (linux/$ARCH)"
-	( cd "$tmp/src" && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o "$tmp/$BIN" ./cmd/sessions-control )
+	( cd "$tmp/src" && CGO_ENABLED=0 go build -trimpath -ldflags "$(ldflags)" -o "$tmp/$BIN" ./cmd/sessions-control )
+	install_binary "$tmp/$BIN"
+}
+
+ldflags() {
+	if [ -n "$VERSION" ]; then
+		printf -- '-s -w -X main.version=%s' "${VERSION#v}"
+	else
+		printf -- '-s -w'
+	fi
+}
+
+repo_root() {
+	dir="$1"
+	while [ "$dir" != "/" ]; do
+		if [ -f "$dir/go.mod" ] && [ -d "$dir/cmd/sessions-control" ]; then
+			printf '%s' "$dir"; return 0
+		fi
+		dir="$(dirname "$dir")"
+	done
+	return 1
+}
+
+build_from_local() {
+	command -v go >/dev/null 2>&1 || die "Go no está instalado. $(source_deps_hint)"
+	[ -d "$LOCAL_DIR" ] || die "no existe el directorio $LOCAL_DIR"
+	root="$(cd "$LOCAL_DIR" && pwd)"
+	root="$(repo_root "$root")" || die "$LOCAL_DIR no es un checkout de sessions-control"
+	tmp="$(mktemp -d)"
+	trap 'rm -rf "$tmp"' EXIT
+	log "compilando desde $root (linux/$ARCH)"
+	( cd "$root" && CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags "$(ldflags)" -o "$tmp/$BIN" ./cmd/sessions-control )
 	install_binary "$tmp/$BIN"
 }
 
@@ -162,6 +204,11 @@ latest_version() {
 	printf '%s' "$json" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"v\{0,1\}\([^"]*\)".*/\1/p' | head -n1
 }
 
+if [ -n "$LOCAL_DIR" ]; then
+	build_from_local
+	exit 0
+fi
+
 if [ "$FROM_SOURCE" = 1 ]; then
 	build_from_source
 	exit 0
@@ -172,11 +219,16 @@ if [ -z "$VERSION" ]; then
 	if [ -z "$VERSION" ]; then
 		warn "no se encontró ninguna release publicada"
 		if command -v go >/dev/null 2>&1; then
-			log "compilando desde fuente"
-			build_from_source
+			if LOCAL_DIR="$(repo_root "$(dirname "$0")")"; then
+				log "compilando desde el checkout local $LOCAL_DIR"
+				build_from_local
+			else
+				log "compilando desde fuente"
+				build_from_source
+			fi
 			exit 0
 		fi
-		die "indica --version VER o instala Go para usar --from-source"
+		die "indica --version VER, --local DIR o instala Go para usar --from-source"
 	fi
 fi
 VERSION="${VERSION#v}"

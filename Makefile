@@ -17,7 +17,7 @@ PKG_ARCH_APK  = $(if $(filter 386,$(PKG_ARCH)),x86,$(PKG_ARCH))
 PKG_ARCH_ARCH = $(if $(filter armv7,$(PKG_ARCH)),armv7h,$(if $(filter 386,$(PKG_ARCH)),i686,$(PKG_ARCH)))
 PLATFORMS := linux/amd64 linux/arm64 linux/arm/v7 linux/386
 
-.PHONY: all build run test vet fmt tidy install clean \
+.PHONY: all build run test vet fmt tidy install install-local clean \
         dist checksums packages release deb rpm apk archlinux packaging-help
 
 all: build
@@ -42,6 +42,11 @@ tidy:
 	go mod tidy
 
 install: build
+	install -d $(PREFIX)
+	install -m 0755 $(OUT) $(PREFIX)/$(BIN)
+
+install-local:
+	go build -trimpath -ldflags "$(LDFLAGS)" -o $(OUT) $(PKG)
 	install -d $(PREFIX)
 	install -m 0755 $(OUT) $(PREFIX)/$(BIN)
 
@@ -113,4 +118,6 @@ packaging-help:
 	@echo "make release                   paquetes para amd64/arm64/armv7/386"
 	@echo "make dist FORCE=1              reconstruye tarballs"
 	@echo "make install                   copia a $(PREFIX)"
+	@echo "make install-local             compila con versión y copia a $(PREFIX)"
 	@echo "packaging/install.sh --user    instalador universal desde release"
+	@echo "packaging/install.sh --local . --user   instalador desde el checkout"

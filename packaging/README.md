@@ -18,7 +18,12 @@ curl -fsSL https://raw.githubusercontent.com/nestorPons/opencode-tui-sessions-co
 ./packaging/install.sh --version 0.1.0 --from-source --user
 ```
 Opciones: `--user`, `--prefix DIR`, `--version VER`, `--from-source`,
-`--uninstall`, `--no-verify`, `--force`.
+`--local DIR`, `--uninstall`, `--no-verify`, `--force`.
+
+```bash
+# sin releases ni conexión: compila el checkout actual
+./packaging/install.sh --local .. --user
+```
 
 ## Paquetes nativos
 Requiere `nfpm` (sin cgo):

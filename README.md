@@ -16,7 +16,7 @@ TUI en Go para auditar el tiempo y los tokens de tus sesiones de opencode.
 curl -fsSL https://raw.githubusercontent.com/nestorPons/opencode-tui-sessions-control/main/packaging/install.sh | bash -s -- --user
 ```
 Opciones: `--user` (~/.local/bin), `--prefix DIR`, `--version VER`,
-`--from-source`, `--uninstall`. Ver `packaging/README.md`.
+`--from-source`, `--local DIR` (checkout local), `--uninstall`. Ver `packaging/README.md`.
 
 ### Paquetes por distro
 ```bash
@@ -36,6 +36,7 @@ make packages    # deb, rpm, apk y archlinux (requiere nfpm)
 ```bash
 make build
 make install        # ~/.local/bin/sessions-control
+./packaging/install.sh --local . --user   # instalador, compila el checkout
 ```
 
 ## Uso
