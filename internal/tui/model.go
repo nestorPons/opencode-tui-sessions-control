@@ -230,6 +230,10 @@ func (m *Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.cursor = 0
 	case "end", "G":
 		m.cursor = len(m.rep.Rows) - 1
+	case "left", "h":
+		m.shiftFilterDay(-1)
+	case "right", "l":
+		m.shiftFilterDay(1)
 	case "f":
 		m.mode = modeFilter
 		m.filterInput.SetValue(m.filter.InputString())
@@ -465,6 +469,63 @@ func (m *Model) applyDatePreset(kind string) {
 	m.reload()
 	m.status = "Filtro " + kind + ": " + m.filter.Describe()
 	m.isError = false
+}
+
+func (m *Model) shiftFilterDay(delta int) {
+	f, ok := shiftDays(m.filter, delta)
+	if !ok {
+		m.status = "Sin días en el filtro: usa t/y o un rango para navegar con ←/→"
+		m.isError = false
+		return
+	}
+	m.filter = f
+	m.cursor = 0
+	m.offset = 0
+	m.reload()
+	m.status = "Filtro: " + m.filter.Describe()
+	m.isError = false
+}
+
+// shiftDays mueve un día el filtro (delta=-1 atrás, delta=1 adelante).
+func shiftDays(f store.Filter, delta int) (store.Filter, bool) {
+	loc := time.Local
+	shift := func(s string) (string, bool) {
+		t, err := time.ParseInLocation("2006-01-02", s, loc)
+		if err != nil {
+			return s, false
+		}
+		return t.AddDate(0, 0, delta).Format("2006-01-02"), true
+	}
+	if len(f.Days) > 0 {
+		days := make([]string, len(f.Days))
+		for i, d := range f.Days {
+			v, ok := shift(d)
+			if !ok {
+				return f, false
+			}
+			days[i] = v
+		}
+		f.Days = days
+		return f, true
+	}
+	moved := false
+	if f.From != "" {
+		v, ok := shift(f.From)
+		if !ok {
+			return f, false
+		}
+		f.From = v
+		moved = true
+	}
+	if f.To != "" {
+		v, ok := shift(f.To)
+		if !ok {
+			return f, false
+		}
+		f.To = v
+		moved = true
+	}
+	return f, moved
 }
 
 func datePreset(kind string, now time.Time, base store.Filter) (store.Filter, bool) {

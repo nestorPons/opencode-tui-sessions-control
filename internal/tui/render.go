@@ -292,7 +292,7 @@ func countSessions(r report.Report) int {
 }
 
 func (m *Model) footerLine() string {
-	keys := "1-4 vistas · ↑↓ mover · f filtro · t/y/w/m fechas · e editar · r restaurar · s sync · x Excel · p PDF · ? ayuda · q salir"
+	keys := "1-4 vistas · ↑↓ mover · ←→ día · f filtro · t/y/w/m fechas · e editar · r restaurar · s sync · x Excel · p PDF · ? ayuda · q salir"
 	return styleDim.Render(padLine(" "+keys, m.width))
 }
 
@@ -349,6 +349,7 @@ func (m *Model) helpModal() []string {
 		"",
 		"1 / 2 / 3 / 4    Vistas: sesiones, proyectos, meses, días",
 		"↑ ↓ j k          Mover selección",
+		"← → h l          Día anterior / siguiente (filtro por días o rango)",
 		"PgUp / PgDn      Página arriba / abajo",
 		"g / G            Ir al principio / final",
 		"",

@@ -79,3 +79,20 @@
 - `README.md` y `packaging/README.md`: instalación por distro.
 - `.gitignore`: `dist/`.
 - Verificado: 4 tarballs + checksums, 16 paquetes (4 distros × 4 arqs), binarios estáticos, `install.sh --from-source` y `--uninstall`; `make test`/`make vet` OK.
+
+## 2026-11-11 — Instalación local y versión inyectable
+- `packaging/install.sh`: nueva opción `--local [DIR]` que compila el checkout actual (sin clonar ni descargar release).
+- Sin release publicada y con Go disponible: usa el checkout del propio script antes de clonar GitHub.
+- `ldflags()` centraliza `-s -w -X main.version`; aplica también a `--from-source`.
+- `cmd/sessions-control/main.go`: `version` pasa de `const` a `var` para que `-ldflags -X` funcione.
+- `Makefile`: nuevo `install-local` (compila con versión y copia a `~/.local/bin`); ayuda actualizada.
+- `README.md` y `packaging/README.md`: documentado `--local` e `install-local`.
+- Instalado en `~/.local/bin/sessions-control` con `./packaging/install.sh --local . --user --force`; smoke `-print` OK.
+- `make test` y `make vet` OK.
+
+## 2026-11-23 — Navegación por días con ←/→
+- `internal/tui/model.go`: nuevas teclas `left`/`h` y `right`/`l` en vista lista para mover el filtro un día atrás/adelante (`shiftFilterDay`).
+- Nuevo `shiftDays`: desplaza `Days` (todos) o el rango `From`/`To`; conserva `project`; sin fechas en el filtro no hace nada y muestra aviso.
+- `internal/tui/model_test.go`: test `TestShiftDays` (ayer, mes/año, varios días, rango, solo mes, sin fechas).
+- `internal/tui/render.go`: ayuda y pie actualizados con `← →`.
+- `make test` y `make vet` OK.

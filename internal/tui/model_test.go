@@ -8,6 +8,44 @@ import (
 	"github.com/nestorpons/sessions-control/internal/store"
 )
 
+func TestShiftDays(t *testing.T) {
+	tests := []struct {
+		name  string
+		base  store.Filter
+		delta int
+		want  store.Filter
+		ok    bool
+	}{
+		{"ayer atrás", store.Filter{Days: []string{"2026-10-26"}}, -1,
+			store.Filter{Days: []string{"2026-10-25"}}, true},
+		{"ayer adelante", store.Filter{Days: []string{"2026-10-26"}}, 1,
+			store.Filter{Days: []string{"2026-10-27"}}, true},
+		{"cambio de mes", store.Filter{Days: []string{"2026-10-01"}}, -1,
+			store.Filter{Days: []string{"2026-09-30"}}, true},
+		{"cambio de año", store.Filter{Days: []string{"2026-01-01"}}, -1,
+			store.Filter{Days: []string{"2025-12-31"}}, true},
+		{"varios días", store.Filter{Days: []string{"2026-10-26", "2026-10-27"}}, -1,
+			store.Filter{Days: []string{"2026-10-25", "2026-10-26"}}, true},
+		{"conserva proyecto", store.Filter{Days: []string{"2026-10-26"}, Project: "alpha"}, 1,
+			store.Filter{Days: []string{"2026-10-27"}, Project: "alpha"}, true},
+		{"rango", store.Filter{From: "2026-10-21", To: "2026-10-27"}, -1,
+			store.Filter{From: "2026-10-20", To: "2026-10-26"}, true},
+		{"solo mes", store.Filter{Month: "2026-10"}, 1, store.Filter{Month: "2026-10"}, false},
+		{"sin fechas", store.Filter{}, 1, store.Filter{}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := shiftDays(tt.base, tt.delta)
+			if ok != tt.ok {
+				t.Fatalf("ok = %v, want %v", ok, tt.ok)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("got %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestDatePreset(t *testing.T) {
 	now := time.Date(2026, 10, 27, 15, 0, 0, 0, time.Local)
 
