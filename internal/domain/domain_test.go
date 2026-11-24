@@ -74,3 +74,29 @@ func TestProjectName(t *testing.T) {
 		}
 	}
 }
+
+func TestEffectiveSums(t *testing.T) {
+	segs := []Segment{
+		seg("a", "2026-10-26", "p1", 9, 11),
+		seg("b", "2026-10-26", "p1", 10, 12),
+	}
+	segs[0].Effective = 30 * time.Minute
+	segs[1].Effective = 45 * time.Minute
+
+	if got := SumEffective(segs); got != 75*time.Minute {
+		t.Fatalf("SumEffective = %v, want 75m", got)
+	}
+	projects := AggregateByProject(segs)
+	if len(projects) != 1 || projects[0].Effective != 75*time.Minute {
+		t.Fatalf("project effective = %+v, want 75m", projects)
+	}
+	sessions := AggregateSessions(segs)
+	if len(sessions) != 2 {
+		t.Fatalf("sessions = %d, want 2", len(sessions))
+	}
+	for _, s := range sessions {
+		if s.Effective == 0 {
+			t.Fatalf("session effective not aggregated: %+v", s)
+		}
+	}
+}

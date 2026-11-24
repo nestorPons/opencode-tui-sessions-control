@@ -2,9 +2,12 @@ package tui
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/nestorpons/sessions-control/internal/domain"
+	"github.com/nestorpons/sessions-control/internal/report"
 	"github.com/nestorpons/sessions-control/internal/store"
 )
 
@@ -80,5 +83,29 @@ func TestDatePreset(t *testing.T) {
 				t.Fatalf("got %+v, want %+v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestViewShowsEffectiveColumn(t *testing.T) {
+	day := time.Date(2026, 11, 23, 11, 14, 0, 0, time.Local)
+	segs := []domain.Segment{{
+		SessionID: "s1", Day: "2026-11-23", Project: "/tmp/p", ProjectName: "p",
+		Title: "una sesión", Start: day, End: day.Add(2 * time.Hour),
+		Effective: 90 * time.Minute,
+	}}
+	rep := report.Build(report.ViewSessions, segs, "test", 15*time.Minute)
+	m := &Model{
+		width: 140, height: 30, view: report.ViewSessions, rep: rep,
+		stats: store.Stats{EffectiveGap: 15 * time.Minute},
+	}
+	out := m.View()
+	if !strings.Contains(out, "Efectivo") {
+		t.Fatalf("view has no Efectivo column:\n%s", out)
+	}
+	if !strings.Contains(out, "huecos ≤ 15 min") {
+		t.Fatalf("view has no effective gap note:\n%s", out)
+	}
+	if !strings.Contains(out, "1.50") {
+		t.Fatalf("view has no effective value:\n%s", out)
 	}
 }

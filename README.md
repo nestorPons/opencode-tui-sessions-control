@@ -5,6 +5,7 @@ TUI en Go para auditar el tiempo y los tokens de tus sesiones de opencode.
 - Lee `~/.local/share/opencode/opencode.db` en modo solo lectura.
 - Guarda agregados y horas editadas en `~/.local/share/sessions-control/sessions.db`.
 - Vistas por sesiones, proyectos, meses y días.
+- Tiempo efectivo: descuenta pausas y cortes (huecos entre mensajes mayores que `-gap`, 15 min por defecto).
 - Filtros por varios días, rango, mes o proyecto.
 - Edición de hora de inicio/fin por tramo (sesión/día).
 - Exportación con totales a Excel y PDF.
@@ -90,15 +91,19 @@ sessions-control -export pdf -view sessions -from 2026-10-01 -to 2026-10-31
 
 # Sin re-sincronizar
 sessions-control -no-sync -print -view days
+
+# Umbral de tiempo efectivo (minutos entre mensajes)
+sessions-control -print -days 2026-11-23 -gap 20
 ```
 
 Flags principales: `-source`, `-db`, `-exports`, `-no-sync`, `-view`,
-`-days`, `-from`, `-to`, `-month`, `-project`, `-out`, `-reset-overrides`.
+`-days`, `-from`, `-to`, `-month`, `-project`, `-gap`, `-out`, `-reset-overrides`.
 
 ## Variables de entorno
 - `SESSIONS_CONTROL_SOURCE`
 - `SESSIONS_CONTROL_DB`
 - `SESSIONS_CONTROL_EXPORTS`
+- `SESSIONS_CONTROL_GAP` (minutos)
 
 ## Documentación
 - `docs/spec.md`: especificación funcional y reglas de cálculo.

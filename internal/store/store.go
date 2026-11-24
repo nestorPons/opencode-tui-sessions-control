@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -30,6 +31,7 @@ CREATE TABLE IF NOT EXISTS session_day (
 	tokens_cache_read  INTEGER NOT NULL DEFAULT 0,
 	tokens_cache_write INTEGER NOT NULL DEFAULT 0,
 	cost               REAL NOT NULL DEFAULT 0,
+	effective_ms       INTEGER NOT NULL DEFAULT 0,
 	PRIMARY KEY (session_id, day)
 );
 CREATE INDEX IF NOT EXISTS session_day_day_idx ON session_day(day);
@@ -52,13 +54,17 @@ type Store struct {
 	db *sql.DB
 }
 
+// DefaultEffectiveGap is the maximum pause between messages still counted as work.
+const DefaultEffectiveGap = 15 * time.Minute
+
 type Stats struct {
-	Source      string
-	SyncedAt    time.Time
-	Sessions    int
-	Segments    int
-	Overrides   int
-	SourceFound bool
+	Source       string
+	SyncedAt     time.Time
+	Sessions     int
+	Segments     int
+	Overrides    int
+	EffectiveGap time.Duration
+	SourceFound  bool
 }
 
 type ProjectRef struct {
@@ -116,7 +122,25 @@ func New(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("init schema: %w", err)
 	}
+	if err := migrate(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate schema: %w", err)
+	}
 	return &Store{db: db}, nil
+}
+
+// migrate adds columns introduced after the first release.
+func migrate(db *sql.DB) error {
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('session_day') WHERE name='effective_ms'`).Scan(&n); err != nil {
+		return err
+	}
+	if n == 0 {
+		if _, err := db.Exec(`ALTER TABLE session_day ADD COLUMN effective_ms INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Store) Close() error { return s.db.Close() }
@@ -140,10 +164,12 @@ type rawMessage struct {
 }
 
 type dayBucket struct {
-	start  int64
-	end    int64
-	tokens domain.Tokens
-	cost   float64
+	start     int64
+	end       int64
+	effective time.Duration
+	lastMsg   int64
+	tokens    domain.Tokens
+	cost      float64
 }
 
 type sessionInfo struct {
@@ -161,8 +187,12 @@ var v2EventTypes = map[string]bool{
 	"agent-switched": true,
 }
 
-// Sync rebuilds session_day from an opencode SQLite database.
-func (s *Store) Sync(source string) (Stats, error) {
+// Sync rebuilds session_day from an opencode SQLite database. Effective time is
+// the sum of gaps between consecutive messages that do not exceed gap.
+func (s *Store) Sync(source string, gap time.Duration) (Stats, error) {
+	if gap <= 0 {
+		gap = DefaultEffectiveGap
+	}
 	src, err := os.Stat(source)
 	if err != nil {
 		return Stats{}, fmt.Errorf("source database %q: %w", source, err)
@@ -195,7 +225,7 @@ func (s *Store) Sync(source string) (Stats, error) {
 			FROM session_v2 s
 			LEFT JOIN session_message m ON m.session_id = s.id
 			ORDER BY s.id, m.time_created, m.id`
-		if err := loadSource(srcDB, query, true, sessions, &order); err != nil {
+		if err := loadSource(srcDB, query, true, sessions, &order, gap); err != nil {
 			return Stats{}, err
 		}
 	}
@@ -209,7 +239,7 @@ func (s *Store) Sync(source string) (Stats, error) {
 			query += ` WHERE s.id NOT IN (SELECT id FROM session_v2)`
 		}
 		query += ` ORDER BY s.id, m.time_created, m.id`
-		if err := loadSource(srcDB, query, false, sessions, &order); err != nil {
+		if err := loadSource(srcDB, query, false, sessions, &order, gap); err != nil {
 			return Stats{}, err
 		}
 	}
@@ -224,8 +254,8 @@ func (s *Store) Sync(source string) (Stats, error) {
 	}
 	insert, err := tx.Prepare(`INSERT INTO session_day
 		(session_id, day, project, project_name, title, start_ms, end_ms,
-		 tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+		 tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, effective_ms)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		return Stats{}, err
 	}
@@ -248,7 +278,7 @@ func (s *Store) Sync(source string) (Stats, error) {
 			b := info.days[d]
 			if _, err := insert.Exec(id, d, info.dir, name, info.title, b.start, b.end,
 				b.tokens.Input, b.tokens.Output, b.tokens.Reasoning,
-				b.tokens.CacheRead, b.tokens.CacheWrite, b.cost); err != nil {
+				b.tokens.CacheRead, b.tokens.CacheWrite, b.cost, b.effective.Milliseconds()); err != nil {
 				return Stats{}, fmt.Errorf("insert segment: %w", err)
 			}
 			segments++
@@ -258,15 +288,17 @@ func (s *Store) Sync(source string) (Stats, error) {
 	now := time.Now()
 	setMeta(tx, "source", source)
 	setMeta(tx, "synced_at", now.Format(time.RFC3339))
+	setMeta(tx, "effective_gap_ms", strconv.FormatInt(gap.Milliseconds(), 10))
 	if err := tx.Commit(); err != nil {
 		return Stats{}, err
 	}
 	return Stats{
-		Source:      source,
-		SyncedAt:    now,
-		Sessions:    len(sessions),
-		Segments:    segments,
-		SourceFound: true,
+		Source:       source,
+		SyncedAt:     now,
+		Sessions:     len(sessions),
+		Segments:     segments,
+		EffectiveGap: gap,
+		SourceFound:  true,
 	}, nil
 }
 
@@ -278,7 +310,7 @@ func hasTable(db *sql.DB, name string) bool {
 
 // loadSource reads sessions and messages. When roleFromType is true the message
 // role comes from session_message.type (opencode V2), otherwise from the data JSON.
-func loadSource(db *sql.DB, query string, roleFromType bool, sessions map[string]*sessionInfo, order *[]string) error {
+func loadSource(db *sql.DB, query string, roleFromType bool, sessions map[string]*sessionInfo, order *[]string, gap time.Duration) error {
 	rows, err := db.Query(query)
 	if err != nil {
 		return fmt.Errorf("query source: %w", err)
@@ -353,6 +385,12 @@ func loadSource(db *sql.DB, query string, roleFromType bool, sessions map[string
 		if end > bucket.end {
 			bucket.end = end
 		}
+		if bucket.lastMsg > 0 {
+			if d := time.Duration(start-bucket.lastMsg) * time.Millisecond; d > 0 && d <= gap {
+				bucket.effective += d
+			}
+		}
+		bucket.lastMsg = start
 		bucket.tokens = bucket.tokens.Add(tok)
 		bucket.cost += cost
 	}
@@ -375,7 +413,7 @@ func (s *Store) Segments(f Filter) ([]domain.Segment, error) {
 		       COALESCE(o.start_ms, sd.start_ms), COALESCE(o.end_ms, sd.end_ms),
 		       CASE WHEN o.session_id IS NULL THEN 0 ELSE 1 END,
 		       sd.tokens_input, sd.tokens_output, sd.tokens_reasoning,
-		       sd.tokens_cache_read, sd.tokens_cache_write, sd.cost
+		       sd.tokens_cache_read, sd.tokens_cache_write, sd.cost, sd.effective_ms
 		FROM session_day sd
 		LEFT JOIN time_override o ON o.session_id = sd.session_id AND o.day = sd.day
 		` + where + `
@@ -391,15 +429,20 @@ func (s *Store) Segments(f Filter) ([]domain.Segment, error) {
 			seg            domain.Segment
 			startMs, endMs int64
 			edited         int
+			effectiveMs    int64
 		)
 		if err := rows.Scan(&seg.SessionID, &seg.Day, &seg.Project, &seg.ProjectName, &seg.Title,
 			&startMs, &endMs, &edited, &seg.Tokens.Input, &seg.Tokens.Output, &seg.Tokens.Reasoning,
-			&seg.Tokens.CacheRead, &seg.Tokens.CacheWrite, &seg.Cost); err != nil {
+			&seg.Tokens.CacheRead, &seg.Tokens.CacheWrite, &seg.Cost, &effectiveMs); err != nil {
 			return nil, err
 		}
 		seg.Start = time.UnixMilli(startMs).Local()
 		seg.End = time.UnixMilli(endMs).Local()
 		seg.Edited = edited == 1
+		seg.Effective = time.Duration(effectiveMs) * time.Millisecond
+		if d := seg.End.Sub(seg.Start); seg.Effective > d {
+			seg.Effective = d
+		}
 		out = append(out, seg)
 	}
 	return out, rows.Err()
@@ -528,6 +571,13 @@ func (s *Store) Stats() (Stats, error) {
 	_ = s.db.QueryRow(`SELECT COUNT(*) FROM session_day`).Scan(&st.Segments)
 	_ = s.db.QueryRow(`SELECT COUNT(DISTINCT session_id) FROM session_day`).Scan(&st.Sessions)
 	_ = s.db.QueryRow(`SELECT COUNT(*) FROM time_override`).Scan(&st.Overrides)
+	var gapMS string
+	_ = s.db.QueryRow(`SELECT value FROM meta WHERE key='effective_gap_ms'`).Scan(&gapMS)
+	if v, err := strconv.ParseInt(gapMS, 10, 64); err == nil && v > 0 {
+		st.EffectiveGap = time.Duration(v) * time.Millisecond
+	} else {
+		st.EffectiveGap = DefaultEffectiveGap
+	}
 	if st.Source != "" {
 		if _, err := os.Stat(st.Source); err == nil {
 			st.SourceFound = true

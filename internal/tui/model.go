@@ -102,7 +102,7 @@ func (m *Model) reload() {
 		m.isError = true
 		return
 	}
-	m.rep = report.Build(m.view, segs, m.filter.Describe())
+	m.rep = report.Build(m.view, segs, m.filter.Describe(), m.gap())
 	if st, err := m.st.Stats(); err == nil {
 		m.stats = st
 	}
@@ -434,9 +434,17 @@ func (m *Model) resetTimes() {
 func (m *Model) syncCmd() tea.Cmd {
 	st, cfg := m.st, m.cfg
 	return func() tea.Msg {
-		stats, err := st.Sync(cfg.SourceDB)
+		stats, err := st.Sync(cfg.SourceDB, cfg.EffectiveGap)
 		return syncMsg{stats: stats, err: err}
 	}
+}
+
+// gap is the threshold actually stored in the local database.
+func (m *Model) gap() time.Duration {
+	if m.stats.EffectiveGap > 0 {
+		return m.stats.EffectiveGap
+	}
+	return m.cfg.EffectiveGap
 }
 
 func (m *Model) exportCmd(format string) tea.Cmd {

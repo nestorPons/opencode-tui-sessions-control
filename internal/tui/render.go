@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 
@@ -92,7 +93,15 @@ func (m *Model) headerLines() []string {
 		source = "(sin sincronizar)"
 	}
 	sourceLine := styleDim.Render("Fuente: " + source)
+	if gap := m.gap(); gap > 0 {
+		sourceLine += styleDim.Render(fmt.Sprintf("   ·   Efectivo: huecos ≤ %s", formatGap(gap)))
+	}
 	return []string{first, filterLine, sourceLine}
+}
+
+// formatGap renders the effective-time threshold in minutes.
+func formatGap(d time.Duration) string {
+	return fmt.Sprintf("%d min", int64(d/time.Minute))
 }
 
 func (m *Model) bodyRows() int {
@@ -140,21 +149,21 @@ func (m *Model) columns() []col {
 	var rights []bool
 	switch m.view {
 	case report.ViewProjects:
-		titles = []string{"Proyecto", "Inicio", "Fin", "Ses.", "Días", "Horas", "Único", "Tokens", "Coste"}
-		weights = []float64{5, 1.5, 1.5, 1.6, 1.2, 1.6, 1.6, 2.3, 1.8}
-		rights = []bool{false, false, false, true, true, true, true, true, true}
+		titles = []string{"Proyecto", "Inicio", "Fin", "Ses.", "Días", "Horas", "Efectivo", "Único", "Tokens", "Coste"}
+		weights = []float64{4.2, 1.4, 1.4, 1.5, 1.1, 1.4, 1.5, 1.4, 2.1, 1.7}
+		rights = []bool{false, false, false, true, true, true, true, true, true, true}
 	case report.ViewMonths:
-		titles = []string{"Mes", "Ses.", "Días", "Horas", "Único", "Tokens", "Coste"}
-		weights = []float64{3, 2, 1.6, 2, 2, 2.6, 2}
-		rights = []bool{false, true, true, true, true, true, true}
+		titles = []string{"Mes", "Ses.", "Días", "Horas", "Efectivo", "Único", "Tokens", "Coste"}
+		weights = []float64{3, 1.9, 1.5, 1.8, 1.8, 1.8, 2.4, 1.9}
+		rights = []bool{false, true, true, true, true, true, true, true}
 	case report.ViewDays:
-		titles = []string{"Fecha", "Ses.", "Horas", "Único", "Tokens", "Coste"}
-		weights = []float64{3, 2, 2, 2, 2.6, 2}
-		rights = []bool{false, true, true, true, true, true}
+		titles = []string{"Fecha", "Ses.", "Horas", "Efectivo", "Único", "Tokens", "Coste"}
+		weights = []float64{3, 1.9, 1.8, 1.8, 1.8, 2.4, 1.9}
+		rights = []bool{false, true, true, true, true, true, true}
 	default:
-		titles = []string{"Fecha", "Inicio", "Fin", "Horas", "Proyecto", "Sesión", "Tokens", "Coste"}
-		weights = []float64{2.2, 1.4, 1.4, 1.4, 3.6, 10, 2.2, 1.8}
-		rights = []bool{false, false, false, true, false, false, true, true}
+		titles = []string{"Fecha", "Inicio", "Fin", "Horas", "Efectivo", "Proyecto", "Sesión", "Tokens", "Coste"}
+		weights = []float64{2.1, 1.3, 1.3, 1.3, 1.4, 3.2, 9, 2.2, 1.8}
+		rights = []bool{false, false, false, true, true, false, false, true, true}
 	}
 	var total float64
 	for _, w := range weights {
@@ -364,6 +373,8 @@ func (m *Model) helpModal() []string {
 		"",
 		"El filtro acepta: 2026-10-26, 2026-10-27 · month=2026-10 ·",
 		"project=clowww.es · from=2026-10-01 to=2026-10-27 · ayer · semana · all",
+		"",
+		styleDim.Render("Efectivo = suma de huecos entre mensajes ≤ " + formatGap(m.gap()) + " (-gap N)."),
 		"",
 		"Esc / ? / Enter  cerrar ayuda",
 	}

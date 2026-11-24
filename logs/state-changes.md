@@ -96,3 +96,21 @@
 - `internal/tui/model_test.go`: test `TestShiftDays` (ayer, mes/año, varios días, rango, solo mes, sin fechas).
 - `internal/tui/render.go`: ayuda y pie actualizados con `← →`.
 - `make test` y `make vet` OK.
+
+## 2026-11-24 — Columna «Efectivo» (tiempo efectivo)
+- Causa: el span de una sesión incluye pausas, cortes de red y esperas; no sirve para facturar.
+- `internal/domain/domain.go`: `Segment/Session/Group.Effective` + `SumEffective`.
+- `internal/store/store.go`: nueva columna `session_day.effective_ms` (con migración para bases existentes).
+  - Cálculo en sync: suma de huecos entre mensajes consecutivos ≤ `gap`; los huecos mayores no cuentan.
+  - Umbral en `meta.effective_gap_ms`; por defecto 15 min.
+  - Overrides manuales recortan el efectivo si el tramo queda más corto.
+- `internal/config/config.go`: `EffectiveGap` (env `SESSIONS_CONTROL_GAP`, minutos).
+- `cmd/sessions-control/main.go`: flag `-gap` (minutos); `-no-sync` usa el umbral guardado y avisa si difiere.
+- `internal/report/report.go`: columna «Efectivo» en las 4 vistas, totales y resumen (`efectivo ≤ N min`).
+- `internal/tui/render.go`: columna en la tabla, umbral en la cabecera y ayuda.
+- `internal/export/*`: columna en Excel (hoja + detalle), resumen «Horas efectivas» y PDF.
+- Tests: `TestEffectiveTime` (sync, umbral, override), `TestEffectiveSums`, `TestViewShowsEffectiveColumn`.
+- Docs: `docs/spec.md`, `docs/AGENTS.md`, `README.md`.
+- Smoke real 2026-11-23: lamostradevalencia.com 9,47 h → 5,31 h efectivas (umbral 15 min).
+- `make test` y `make vet` OK; XLSX y PDF generados y legibles.
+- Instalado en `~/.local/bin/sessions-control` con `make install-local`.

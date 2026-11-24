@@ -75,7 +75,7 @@ func TestSyncQueryAndOverrides(t *testing.T) {
 	}
 	defer st.Close()
 
-	stats, err := st.Sync(src)
+	stats, err := st.Sync(src, 15*time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +144,7 @@ func TestSyncQueryAndOverrides(t *testing.T) {
 	if err := st.UpdateTimes(target.SessionID, target.Day, start, end); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.Sync(src); err != nil {
+	if _, err := st.Sync(src, 15*time.Minute); err != nil {
 		t.Fatal(err)
 	}
 	after, err := st.Segments(Filter{Days: []string{"2026-10-26"}})
@@ -227,7 +227,7 @@ func TestSyncPrefersV2Schema(t *testing.T) {
 	}
 	defer st.Close()
 
-	stats, err := st.Sync(src)
+	stats, err := st.Sync(src, 15*time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -279,7 +279,7 @@ func TestFilterProjectAndMonth(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	if _, err := st.Sync(src); err != nil {
+	if _, err := st.Sync(src, 15*time.Minute); err != nil {
 		t.Fatal(err)
 	}
 	segs, err := st.Segments(Filter{Month: "2026-10", Project: "alpha"})
@@ -291,5 +291,105 @@ func TestFilterProjectAndMonth(t *testing.T) {
 	}
 	if _, err := st.Segments(Filter{Days: []string{"2026-10-25"}}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func createSourceGaps(t *testing.T, path string) {
+	t.Helper()
+	db, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	for _, q := range []string{
+		`CREATE TABLE session_v2 (id TEXT PRIMARY KEY, directory TEXT NOT NULL, title TEXT, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL)`,
+		`CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, type TEXT NOT NULL, seq INTEGER NOT NULL, time_created INTEGER NOT NULL, data TEXT NOT NULL)`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	at := func(h, m int) int64 {
+		return time.Date(2026, 11, 10, h, m, 0, 0, time.Local).UnixMilli()
+	}
+	msgs := []struct {
+		id, kind string
+		ts       int64
+	}{
+		{"m1", "user", at(9, 0)},
+		{"m2", "assistant", at(9, 10)},
+		{"m3", "assistant", at(9, 30)},
+		{"m4", "assistant", at(10, 0)},
+		{"m5", "assistant", at(10, 5)},
+	}
+	for i, m := range msgs {
+		data := fmt.Sprintf(`{"time":{"created":%d},"tokens":{"input":1,"output":1,"reasoning":0,"cache":{"read":0,"write":0}}}`, m.ts)
+		if _, err := db.Exec(`INSERT INTO session_message(id,session_id,type,seq,time_created,data) VALUES(?,?,?,?,?,?)`,
+			m.id, "g1", m.kind, i+1, m.ts, data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.Exec(`INSERT INTO session_v2(id,directory,title,time_created,time_updated) VALUES(?,?,?,?,?)`,
+		"g1", "/home/admin/Proyectos/gaps", "gaps", at(9, 0), at(10, 5)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestEffectiveTime(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "opencode.db")
+	createSourceGaps(t, src)
+	st, err := New(filepath.Join(dir, "app.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	if _, err := st.Sync(src, 15*time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	segs, err := st.Segments(Filter{Days: []string{"2026-11-10"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(segs) != 1 {
+		t.Fatalf("segments = %d, want 1", len(segs))
+	}
+	seg := segs[0]
+	if got := seg.Effective; got != 15*time.Minute {
+		t.Fatalf("effective = %v, want 15m (gaps 10, 20, 30, 5 with threshold 15)", got)
+	}
+	if got := seg.Duration(); got != 65*time.Minute {
+		t.Fatalf("duration = %v, want 65m", got)
+	}
+
+	if _, err := st.Sync(src, 30*time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	wide, err := st.Segments(Filter{Days: []string{"2026-11-10"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := wide[0].Effective; got != 65*time.Minute {
+		t.Fatalf("effective with 30m gap = %v, want 65m", got)
+	}
+
+	start := wide[0].Start
+	if err := st.UpdateTimes("g1", "2026-11-10", start, start.Add(5*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	edited, err := st.Segments(Filter{Days: []string{"2026-11-10"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := edited[0].Effective; got != 5*time.Minute {
+		t.Fatalf("effective after shrinking override = %v, want 5m", got)
+	}
+	stats, err := st.Stats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.EffectiveGap != 30*time.Minute {
+		t.Fatalf("stats gap = %v, want 30m", stats.EffectiveGap)
 	}
 }

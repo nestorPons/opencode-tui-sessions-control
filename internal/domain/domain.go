@@ -39,6 +39,7 @@ type Segment struct {
 	Start       time.Time
 	End         time.Time
 	Edited      bool
+	Effective   time.Duration // gaps <= EffectiveGap between messages
 	Tokens      Tokens
 	Cost        float64
 }
@@ -56,6 +57,7 @@ type Session struct {
 	Days        int
 	Worked      time.Duration // sum of segments
 	Unique      time.Duration // union of segments
+	Effective   time.Duration // sum of effective time
 	Tokens      Tokens
 	Cost        float64
 	Edited      bool
@@ -63,16 +65,17 @@ type Session struct {
 
 // Group is an aggregated set of segments (project, month or day).
 type Group struct {
-	Key      string
-	Label    string
-	Sessions int
-	Days     int
-	Start    time.Time
-	End      time.Time
-	Worked   time.Duration // sum of durations, overlaps counted
-	Unique   time.Duration // union of intervals
-	Tokens   Tokens
-	Cost     float64
+	Key       string
+	Label     string
+	Sessions  int
+	Days      int
+	Start     time.Time
+	End       time.Time
+	Worked    time.Duration // sum of durations, overlaps counted
+	Unique    time.Duration // union of intervals
+	Effective time.Duration // sum of effective time
+	Tokens    Tokens
+	Cost      float64
 }
 
 func ProjectName(dir string) string {
@@ -122,6 +125,15 @@ func SumDurations(segs []Segment) time.Duration {
 	return d
 }
 
+// SumEffective adds the effective time of every segment.
+func SumEffective(segs []Segment) time.Duration {
+	var d time.Duration
+	for _, s := range segs {
+		d += s.Effective
+	}
+	return d
+}
+
 // DistinctDays counts different calendar days.
 func DistinctDays(segs []Segment) int {
 	seen := map[string]struct{}{}
@@ -158,6 +170,7 @@ func AggregateSessions(segs []Segment) []Session {
 		}
 		agg.Days++
 		agg.Worked += s.Duration()
+		agg.Effective += s.Effective
 		agg.Tokens = agg.Tokens.Add(s.Tokens)
 		agg.Cost += s.Cost
 		agg.Edited = agg.Edited || s.Edited
@@ -291,6 +304,7 @@ func (g *Group) add(s Segment) {
 		g.End = s.End
 	}
 	g.Worked += s.Duration()
+	g.Effective += s.Effective
 	g.Tokens = g.Tokens.Add(s.Tokens)
 	g.Cost += s.Cost
 }

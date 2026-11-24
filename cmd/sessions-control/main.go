@@ -38,6 +38,7 @@ func run() error {
 		toFlag      = flag.String("to", "", "día final YYYY-MM-DD")
 		monthFlag   = flag.String("month", "", "mes YYYY-MM")
 		project     = flag.String("project", "", "proyecto (nombre o ruta)")
+		gapFlag     = flag.Int("gap", 0, "minutos máximos entre mensajes para el tiempo efectivo (0 = 15)")
 		exportFlag  = flag.String("export", "", "exportar: xlsx o pdf")
 		outFlag     = flag.String("out", "", "ruta del archivo exportado")
 		printFlag   = flag.Bool("print", false, "imprimir la tabla por stdout y salir")
@@ -64,6 +65,9 @@ func run() error {
 	if *exportsDir != "" {
 		cfg.ExportsDir = *exportsDir
 	}
+	if *gapFlag > 0 {
+		cfg.EffectiveGap = time.Duration(*gapFlag) * time.Minute
+	}
 	if err := cfg.EnsureDirs(); err != nil {
 		return err
 	}
@@ -77,7 +81,7 @@ func run() error {
 	interactive := !*printFlag && *exportFlag == ""
 
 	if !*noSync {
-		stats, err := st.Sync(cfg.SourceDB)
+		stats, err := st.Sync(cfg.SourceDB, cfg.EffectiveGap)
 		if err != nil {
 			if interactive {
 				fmt.Fprintln(os.Stderr, "aviso: no se pudo sincronizar:", err)
@@ -100,6 +104,13 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	effGap := stats.EffectiveGap
+	if effGap <= 0 {
+		effGap = cfg.EffectiveGap
+	}
+	if *noSync && *gapFlag > 0 && effGap != cfg.EffectiveGap {
+		fmt.Fprintln(os.Stderr, "aviso: -gap requiere sincronizar; se usa el valor guardado")
+	}
 
 	if *printFlag || *exportFlag != "" {
 		view, ok := report.ParseView(*viewFlag)
@@ -114,7 +125,7 @@ func run() error {
 		if err != nil {
 			return err
 		}
-		rep := report.Build(view, segs, filter.Describe())
+		rep := report.Build(view, segs, filter.Describe(), effGap)
 
 		if *printFlag {
 			printReport(rep)

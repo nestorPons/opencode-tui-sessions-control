@@ -33,6 +33,7 @@ make packages   # deb, rpm, apk, archlinux (requiere nfpm)
 - Ediciones solo en `time_override`; `session_day` es reconstruible.
 - `sync` no borra overrides.
 - `unique` = unión de intervalos; `worked` = suma de duraciones.
+- `effective` = suma de huecos entre mensajes ≤ `gap`; se recalcula en cada sync y se recorta al tramo editado.
 - Fila TOTAL de grupos = unión global, no suma de únicos por grupo.
 - Tokens solo de mensajes `assistant`.
 - Día y horas en `time.Local`.
