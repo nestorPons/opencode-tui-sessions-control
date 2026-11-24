@@ -150,7 +150,7 @@ func addDetailSheet(f *excelize.File, r report.Report) error {
 	if _, err := f.NewSheet(name); err != nil {
 		return err
 	}
-	headers := []string{"Fecha", "Inicio", "Fin", "Horas", "Efectivo", "Proyecto", "Directorio", "Sesión", "Session ID",
+	headers := []string{"Fecha", "Inicio", "Fin", "Horas", "Efectivo", "Reparto", "Proyecto", "Directorio", "Sesión", "Session ID",
 		"Input", "Output", "Reasoning", "Cache read", "Cache write", "Tokens", "Coste", "Editado"}
 	for i, h := range headers {
 		cell, _ := excelize.CoordinatesToCellName(i+1, 1)
@@ -171,7 +171,7 @@ func addDetailSheet(f *excelize.File, r report.Report) error {
 	var totalCost float64
 	for i, s := range r.Raw {
 		row := i + 2
-		vals := []any{s.Day, s.Start.Format("15:04"), s.End.Format("15:04"), hoursOf(s), effectiveOf(s),
+		vals := []any{s.Day, s.Start.Format("15:04"), s.End.Format("15:04"), hoursOf(s), effectiveOf(s), allocatedOf(s),
 			s.ProjectName, s.Project, s.Title, s.SessionID,
 			s.Tokens.Input, s.Tokens.Output, s.Tokens.Reasoning, s.Tokens.CacheRead, s.Tokens.CacheWrite,
 			s.Tokens.Total(), round4(s.Cost), boolText(s.Edited)}
@@ -179,11 +179,11 @@ func addDetailSheet(f *excelize.File, r report.Report) error {
 			cell, _ := excelize.CoordinatesToCellName(ci+1, row)
 			_ = f.SetCellValue(name, cell, v)
 			switch ci {
-			case 3, 4:
+			case 3, 4, 5:
 				_ = f.SetCellStyle(name, cell, cell, hourStyle)
-			case 9, 10, 11, 12, 13, 14:
+			case 10, 11, 12, 13, 14, 15:
 				_ = f.SetCellStyle(name, cell, cell, tokenStyle)
-			case 15:
+			case 16:
 				_ = f.SetCellStyle(name, cell, cell, moneyStyle)
 			}
 		}
@@ -191,8 +191,8 @@ func addDetailSheet(f *excelize.File, r report.Report) error {
 		totalCost += s.Cost
 	}
 	totalRow := len(r.Raw) + 2
-	vals := []any{"TOTAL", "", "", hoursAny(r.Raw), effectiveAny(r.Raw), "", "", "", "",
-		"", "", "", "", "", "", totalTokens, round4(totalCost), ""}
+	vals := []any{"TOTAL", "", "", hoursAny(r.Raw), effectiveAny(r.Raw), allocatedAny(r.Raw), "", "", "",
+		"", "", "", "", "", "", "", totalTokens, round4(totalCost), ""}
 	for ci, v := range vals {
 		cell, _ := excelize.CoordinatesToCellName(ci+1, totalRow)
 		_ = f.SetCellValue(name, cell, v)
@@ -202,13 +202,13 @@ func addDetailSheet(f *excelize.File, r report.Report) error {
 	_ = f.SetCellStyle(name, fmt.Sprintf("A%d", totalRow), fmt.Sprintf("%s%d", last, totalRow), totalStyle)
 	_ = f.SetColWidth(name, "A", "A", 12)
 	_ = f.SetColWidth(name, "B", "C", 8)
-	_ = f.SetColWidth(name, "D", "E", 8)
-	_ = f.SetColWidth(name, "F", "F", 22)
-	_ = f.SetColWidth(name, "G", "G", 40)
-	_ = f.SetColWidth(name, "H", "H", 50)
-	_ = f.SetColWidth(name, "I", "I", 34)
-	_ = f.SetColWidth(name, "J", "P", 14)
-	_ = f.SetColWidth(name, "Q", "Q", 9)
+	_ = f.SetColWidth(name, "D", "F", 8)
+	_ = f.SetColWidth(name, "G", "G", 22)
+	_ = f.SetColWidth(name, "H", "H", 40)
+	_ = f.SetColWidth(name, "I", "I", 50)
+	_ = f.SetColWidth(name, "J", "J", 34)
+	_ = f.SetColWidth(name, "K", "Q", 14)
+	_ = f.SetColWidth(name, "R", "R", 9)
 	_ = f.SetPanes(name, &excelize.Panes{Freeze: true, YSplit: 1, TopLeftCell: "A2", ActivePane: "bottomLeft"})
 	return nil
 }
@@ -231,6 +231,7 @@ func addSummarySheet(f *excelize.File, r report.Report, st store.Stats) error {
 		{"Tramos (día/sesión)", len(r.Raw)},
 		{"Horas trabajadas", hoursAny(r.Raw)},
 		{"Horas efectivas", effectiveAny(r.Raw)},
+		{"Horas repartidas", allocatedAny(r.Raw)},
 		{"Horas únicas", uniqueHours(r.Raw)},
 		{"Tokens totales", totalTokens(r.Raw)},
 		{"Coste", round4(totalCost(r.Raw))},
@@ -290,6 +291,14 @@ func effectiveOf(s domain.Segment) float64 {
 
 func effectiveAny(segs []domain.Segment) float64 {
 	return float64(domain.SumEffective(segs)) / float64(time.Hour)
+}
+
+func allocatedOf(s domain.Segment) float64 {
+	return float64(s.Allocated) / float64(time.Hour)
+}
+
+func allocatedAny(segs []domain.Segment) float64 {
+	return float64(domain.SumAllocated(segs)) / float64(time.Hour)
 }
 
 func hoursAny(segs []domain.Segment) float64 {

@@ -40,6 +40,7 @@ type Segment struct {
 	End         time.Time
 	Edited      bool
 	Effective   time.Duration // gaps <= EffectiveGap between messages
+	Allocated   time.Duration // proportional share of the real day
 	Tokens      Tokens
 	Cost        float64
 }
@@ -58,6 +59,7 @@ type Session struct {
 	Worked      time.Duration // sum of segments
 	Unique      time.Duration // union of segments
 	Effective   time.Duration // sum of effective time
+	Allocated   time.Duration // sum of allocated time
 	Tokens      Tokens
 	Cost        float64
 	Edited      bool
@@ -74,6 +76,7 @@ type Group struct {
 	Worked    time.Duration // sum of durations, overlaps counted
 	Unique    time.Duration // union of intervals
 	Effective time.Duration // sum of effective time
+	Allocated time.Duration // sum of allocated time
 	Tokens    Tokens
 	Cost      float64
 }
@@ -134,6 +137,15 @@ func SumEffective(segs []Segment) time.Duration {
 	return d
 }
 
+// SumAllocated adds the allocated time of every segment.
+func SumAllocated(segs []Segment) time.Duration {
+	var d time.Duration
+	for _, s := range segs {
+		d += s.Allocated
+	}
+	return d
+}
+
 // DistinctDays counts different calendar days.
 func DistinctDays(segs []Segment) int {
 	seen := map[string]struct{}{}
@@ -171,6 +183,7 @@ func AggregateSessions(segs []Segment) []Session {
 		agg.Days++
 		agg.Worked += s.Duration()
 		agg.Effective += s.Effective
+		agg.Allocated += s.Allocated
 		agg.Tokens = agg.Tokens.Add(s.Tokens)
 		agg.Cost += s.Cost
 		agg.Edited = agg.Edited || s.Edited
@@ -305,6 +318,7 @@ func (g *Group) add(s Segment) {
 	}
 	g.Worked += s.Duration()
 	g.Effective += s.Effective
+	g.Allocated += s.Allocated
 	g.Tokens = g.Tokens.Add(s.Tokens)
 	g.Cost += s.Cost
 }

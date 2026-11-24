@@ -96,6 +96,9 @@ func (m *Model) headerLines() []string {
 	if gap := m.gap(); gap > 0 {
 		sourceLine += styleDim.Render(fmt.Sprintf("   ·   Efectivo: huecos ≤ %s", formatGap(gap)))
 	}
+	if dayGap := m.dayGap(); dayGap > 0 {
+		sourceLine += styleDim.Render(fmt.Sprintf("   ·   Reparto: ≤ %s", formatGap(dayGap)))
+	}
 	return []string{first, filterLine, sourceLine}
 }
 
@@ -149,21 +152,21 @@ func (m *Model) columns() []col {
 	var rights []bool
 	switch m.view {
 	case report.ViewProjects:
-		titles = []string{"Proyecto", "Inicio", "Fin", "Ses.", "Días", "Horas", "Efectivo", "Único", "Tokens", "Coste"}
-		weights = []float64{4.2, 1.4, 1.4, 1.5, 1.1, 1.4, 1.5, 1.4, 2.1, 1.7}
-		rights = []bool{false, false, false, true, true, true, true, true, true, true}
+		titles = []string{"Proyecto", "Inicio", "Fin", "Ses.", "Días", "Horas", "Efectivo", "Reparto", "Único", "Tokens", "Coste"}
+		weights = []float64{3.9, 1.3, 1.3, 1.3, 1.0, 1.3, 1.4, 1.4, 1.3, 2.0, 1.6}
+		rights = []bool{false, false, false, true, true, true, true, true, true, true, true}
 	case report.ViewMonths:
-		titles = []string{"Mes", "Ses.", "Días", "Horas", "Efectivo", "Único", "Tokens", "Coste"}
-		weights = []float64{3, 1.9, 1.5, 1.8, 1.8, 1.8, 2.4, 1.9}
-		rights = []bool{false, true, true, true, true, true, true, true}
+		titles = []string{"Mes", "Ses.", "Días", "Horas", "Efectivo", "Reparto", "Único", "Tokens", "Coste"}
+		weights = []float64{2.8, 1.7, 1.3, 1.6, 1.6, 1.6, 1.6, 2.2, 1.7}
+		rights = []bool{false, true, true, true, true, true, true, true, true}
 	case report.ViewDays:
-		titles = []string{"Fecha", "Ses.", "Horas", "Efectivo", "Único", "Tokens", "Coste"}
-		weights = []float64{3, 1.9, 1.8, 1.8, 1.8, 2.4, 1.9}
-		rights = []bool{false, true, true, true, true, true, true}
+		titles = []string{"Fecha", "Ses.", "Horas", "Efectivo", "Reparto", "Único", "Tokens", "Coste"}
+		weights = []float64{2.8, 1.7, 1.6, 1.6, 1.6, 1.6, 2.2, 1.7}
+		rights = []bool{false, true, true, true, true, true, true, true}
 	default:
-		titles = []string{"Fecha", "Inicio", "Fin", "Horas", "Efectivo", "Proyecto", "Sesión", "Tokens", "Coste"}
-		weights = []float64{2.1, 1.3, 1.3, 1.3, 1.4, 3.2, 9, 2.2, 1.8}
-		rights = []bool{false, false, false, true, true, false, false, true, true}
+		titles = []string{"Fecha", "Inicio", "Fin", "Horas", "Efectivo", "Reparto", "Proyecto", "Sesión", "Tokens", "Coste"}
+		weights = []float64{2.0, 1.25, 1.25, 1.2, 1.3, 1.3, 3.0, 8.5, 2.1, 1.7}
+		rights = []bool{false, false, false, true, true, true, false, false, true, true}
 	}
 	var total float64
 	for _, w := range weights {
@@ -374,7 +377,8 @@ func (m *Model) helpModal() []string {
 		"El filtro acepta: 2026-10-26, 2026-10-27 · month=2026-10 ·",
 		"project=clowww.es · from=2026-10-01 to=2026-10-27 · ayer · semana · all",
 		"",
-		styleDim.Render("Efectivo = suma de huecos entre mensajes ≤ " + formatGap(m.gap()) + " (-gap N)."),
+		styleDim.Render("Efectivo = huecos entre mensajes ≤ " + formatGap(m.gap()) + " (-gap N)."),
+		styleDim.Render("Reparto = parte de la jornada facturable, sin contar proyectos internos (-internal)."),
 		"",
 		"Esc / ? / Enter  cerrar ayuda",
 	}

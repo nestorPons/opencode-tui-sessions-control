@@ -6,6 +6,7 @@ TUI en Go para auditar el tiempo y los tokens de tus sesiones de opencode.
 - Guarda agregados y horas editadas en `~/.local/share/sessions-control/sessions.db`.
 - Vistas por sesiones, proyectos, meses y días.
 - Tiempo efectivo: descuenta pausas y cortes (huecos entre mensajes mayores que `-gap`, 15 min por defecto).
+- Reparto: reparte la jornada real entre proyectos facturables, sin contar los internos (`-internal`). La suma del reparto es la jornada (6 h un día, 8 h otro), no la suma de efectivos.
 - Filtros por varios días, rango, mes o proyecto.
 - Edición de hora de inicio/fin por tramo (sesión/día).
 - Exportación con totales a Excel y PDF.
@@ -94,16 +95,23 @@ sessions-control -no-sync -print -view days
 
 # Umbral de tiempo efectivo (minutos entre mensajes)
 sessions-control -print -days 2026-11-23 -gap 20
+
+# Jornada y reparto: 5 min y proyectos internos fuera del cómputo
+sessions-control -print -days 2026-11-23 -day-gap 5 \
+  -internal "mi-web,mi-blog"
 ```
 
 Flags principales: `-source`, `-db`, `-exports`, `-no-sync`, `-view`,
-`-days`, `-from`, `-to`, `-month`, `-project`, `-gap`, `-out`, `-reset-overrides`.
+`-days`, `-from`, `-to`, `-month`, `-project`, `-gap`, `-day-gap`, `-internal`,
+`-out`, `-reset-overrides`.
 
 ## Variables de entorno
 - `SESSIONS_CONTROL_SOURCE`
 - `SESSIONS_CONTROL_DB`
 - `SESSIONS_CONTROL_EXPORTS`
 - `SESSIONS_CONTROL_GAP` (minutos)
+- `SESSIONS_CONTROL_DAY_GAP` (minutos)
+- `SESSIONS_CONTROL_INTERNAL` (proyectos internos separados por comas)
 
 ## Documentación
 - `docs/spec.md`: especificación funcional y reglas de cálculo.

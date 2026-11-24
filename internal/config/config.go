@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -13,6 +14,8 @@ type Config struct {
 	AppDB        string
 	ExportsDir   string
 	EffectiveGap time.Duration
+	DayGap       time.Duration
+	Internal     []string
 }
 
 func Default() (Config, error) {
@@ -25,6 +28,8 @@ func Default() (Config, error) {
 		AppDB:        filepath.Join(home, ".local", "share", "sessions-control", "sessions.db"),
 		ExportsDir:   filepath.Join(home, "sessions-control-exports"),
 		EffectiveGap: 15 * time.Minute,
+		DayGap:       5 * time.Minute,
+		Internal:     []string{"global", "sessions-control"},
 	}
 	if v := os.Getenv("SESSIONS_CONTROL_SOURCE"); v != "" {
 		cfg.SourceDB = v
@@ -40,7 +45,25 @@ func Default() (Config, error) {
 			cfg.EffectiveGap = time.Duration(n) * time.Minute
 		}
 	}
+	if v := os.Getenv("SESSIONS_CONTROL_DAY_GAP"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.DayGap = time.Duration(n) * time.Minute
+		}
+	}
+	if v := os.Getenv("SESSIONS_CONTROL_INTERNAL"); v != "" {
+		cfg.Internal = splitList(v)
+	}
 	return cfg, nil
+}
+
+func splitList(s string) []string {
+	var out []string
+	for _, part := range strings.Split(s, ",") {
+		if p := strings.TrimSpace(part); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func (c Config) EnsureDirs() error {

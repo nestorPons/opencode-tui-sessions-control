@@ -91,21 +91,24 @@ func TestViewShowsEffectiveColumn(t *testing.T) {
 	segs := []domain.Segment{{
 		SessionID: "s1", Day: "2026-11-23", Project: "/tmp/p", ProjectName: "p",
 		Title: "una sesión", Start: day, End: day.Add(2 * time.Hour),
-		Effective: 90 * time.Minute,
+		Effective: 90 * time.Minute, Allocated: 60 * time.Minute,
 	}}
-	rep := report.Build(report.ViewSessions, segs, "test", 15*time.Minute)
+	rep := report.Build(report.ViewSessions, segs, "test", 15*time.Minute, 5*time.Minute)
 	m := &Model{
 		width: 140, height: 30, view: report.ViewSessions, rep: rep,
-		stats: store.Stats{EffectiveGap: 15 * time.Minute},
+		stats: store.Stats{EffectiveGap: 15 * time.Minute, DayGap: 5 * time.Minute},
 	}
 	out := m.View()
 	if !strings.Contains(out, "Efectivo") {
 		t.Fatalf("view has no Efectivo column:\n%s", out)
 	}
+	if !strings.Contains(out, "Reparto") {
+		t.Fatalf("view has no Reparto column:\n%s", out)
+	}
 	if !strings.Contains(out, "huecos ≤ 15 min") {
 		t.Fatalf("view has no effective gap note:\n%s", out)
 	}
-	if !strings.Contains(out, "1.50") {
-		t.Fatalf("view has no effective value:\n%s", out)
+	if !strings.Contains(out, "1.50") || !strings.Contains(out, "1.00") {
+		t.Fatalf("view has no effective/allocated value:\n%s", out)
 	}
 }

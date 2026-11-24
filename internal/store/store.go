@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"sort"
 	"strconv"
@@ -32,6 +33,7 @@ CREATE TABLE IF NOT EXISTS session_day (
 	tokens_cache_write INTEGER NOT NULL DEFAULT 0,
 	cost               REAL NOT NULL DEFAULT 0,
 	effective_ms       INTEGER NOT NULL DEFAULT 0,
+	allocated_ms       INTEGER NOT NULL DEFAULT 0,
 	PRIMARY KEY (session_id, day)
 );
 CREATE INDEX IF NOT EXISTS session_day_day_idx ON session_day(day);
@@ -57,6 +59,39 @@ type Store struct {
 // DefaultEffectiveGap is the maximum pause between messages still counted as work.
 const DefaultEffectiveGap = 15 * time.Minute
 
+// DefaultDayGap is the maximum pause between messages still counted in the day.
+const DefaultDayGap = 5 * time.Minute
+
+// Options configures the sync and the effective/allocated time rules.
+type Options struct {
+	Gap      time.Duration // per-session pause threshold
+	DayGap   time.Duration // global day pause threshold
+	Internal []string      // project names or paths excluded from the allocation
+}
+
+func (o Options) withDefaults() Options {
+	if o.Gap <= 0 {
+		o.Gap = DefaultEffectiveGap
+	}
+	if o.DayGap <= 0 {
+		o.DayGap = DefaultDayGap
+	}
+	return o
+}
+
+func (o Options) isInternal(dir, name string) bool {
+	// The app itself and sessions run from the home directory are never billable.
+	if name == "global" || name == "sessions-control" {
+		return true
+	}
+	for _, p := range o.Internal {
+		if p == dir || p == name {
+			return true
+		}
+	}
+	return false
+}
+
 type Stats struct {
 	Source       string
 	SyncedAt     time.Time
@@ -64,6 +99,7 @@ type Stats struct {
 	Segments     int
 	Overrides    int
 	EffectiveGap time.Duration
+	DayGap       time.Duration
 	SourceFound  bool
 }
 
@@ -131,13 +167,19 @@ func New(path string) (*Store, error) {
 
 // migrate adds columns introduced after the first release.
 func migrate(db *sql.DB) error {
-	var n int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('session_day') WHERE name='effective_ms'`).Scan(&n); err != nil {
-		return err
+	cols := map[string]string{
+		"effective_ms": "ALTER TABLE session_day ADD COLUMN effective_ms INTEGER NOT NULL DEFAULT 0",
+		"allocated_ms": "ALTER TABLE session_day ADD COLUMN allocated_ms INTEGER NOT NULL DEFAULT 0",
 	}
-	if n == 0 {
-		if _, err := db.Exec(`ALTER TABLE session_day ADD COLUMN effective_ms INTEGER NOT NULL DEFAULT 0`); err != nil {
+	for name, stmt := range cols {
+		var n int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('session_day') WHERE name=?`, name).Scan(&n); err != nil {
 			return err
+		}
+		if n == 0 {
+			if _, err := db.Exec(stmt); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -167,6 +209,8 @@ type dayBucket struct {
 	start     int64
 	end       int64
 	effective time.Duration
+	allocated time.Duration
+	times     []int64
 	lastMsg   int64
 	tokens    domain.Tokens
 	cost      float64
@@ -188,11 +232,10 @@ var v2EventTypes = map[string]bool{
 }
 
 // Sync rebuilds session_day from an opencode SQLite database. Effective time is
-// the sum of gaps between consecutive messages that do not exceed gap.
-func (s *Store) Sync(source string, gap time.Duration) (Stats, error) {
-	if gap <= 0 {
-		gap = DefaultEffectiveGap
-	}
+// the sum of gaps between consecutive messages that do not exceed opt.Gap.
+// Allocated time is the share of the billable day, proportional to Effective.
+func (s *Store) Sync(source string, opt Options) (Stats, error) {
+	opt = opt.withDefaults()
 	src, err := os.Stat(source)
 	if err != nil {
 		return Stats{}, fmt.Errorf("source database %q: %w", source, err)
@@ -225,7 +268,7 @@ func (s *Store) Sync(source string, gap time.Duration) (Stats, error) {
 			FROM session_v2 s
 			LEFT JOIN session_message m ON m.session_id = s.id
 			ORDER BY s.id, m.time_created, m.id`
-		if err := loadSource(srcDB, query, true, sessions, &order, gap); err != nil {
+		if err := loadSource(srcDB, query, true, sessions, &order, opt.Gap); err != nil {
 			return Stats{}, err
 		}
 	}
@@ -239,10 +282,12 @@ func (s *Store) Sync(source string, gap time.Duration) (Stats, error) {
 			query += ` WHERE s.id NOT IN (SELECT id FROM session_v2)`
 		}
 		query += ` ORDER BY s.id, m.time_created, m.id`
-		if err := loadSource(srcDB, query, false, sessions, &order, gap); err != nil {
+		if err := loadSource(srcDB, query, false, sessions, &order, opt.Gap); err != nil {
 			return Stats{}, err
 		}
 	}
+
+	allocateDays(sessions, order, opt)
 
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -254,8 +299,9 @@ func (s *Store) Sync(source string, gap time.Duration) (Stats, error) {
 	}
 	insert, err := tx.Prepare(`INSERT INTO session_day
 		(session_id, day, project, project_name, title, start_ms, end_ms,
-		 tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost, effective_ms)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+		 tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost,
+		 effective_ms, allocated_ms)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		return Stats{}, err
 	}
@@ -278,7 +324,8 @@ func (s *Store) Sync(source string, gap time.Duration) (Stats, error) {
 			b := info.days[d]
 			if _, err := insert.Exec(id, d, info.dir, name, info.title, b.start, b.end,
 				b.tokens.Input, b.tokens.Output, b.tokens.Reasoning,
-				b.tokens.CacheRead, b.tokens.CacheWrite, b.cost, b.effective.Milliseconds()); err != nil {
+				b.tokens.CacheRead, b.tokens.CacheWrite, b.cost,
+				b.effective.Milliseconds(), b.allocated.Milliseconds()); err != nil {
 				return Stats{}, fmt.Errorf("insert segment: %w", err)
 			}
 			segments++
@@ -288,7 +335,8 @@ func (s *Store) Sync(source string, gap time.Duration) (Stats, error) {
 	now := time.Now()
 	setMeta(tx, "source", source)
 	setMeta(tx, "synced_at", now.Format(time.RFC3339))
-	setMeta(tx, "effective_gap_ms", strconv.FormatInt(gap.Milliseconds(), 10))
+	setMeta(tx, "effective_gap_ms", strconv.FormatInt(opt.Gap.Milliseconds(), 10))
+	setMeta(tx, "day_gap_ms", strconv.FormatInt(opt.DayGap.Milliseconds(), 10))
 	if err := tx.Commit(); err != nil {
 		return Stats{}, err
 	}
@@ -297,7 +345,8 @@ func (s *Store) Sync(source string, gap time.Duration) (Stats, error) {
 		SyncedAt:     now,
 		Sessions:     len(sessions),
 		Segments:     segments,
-		EffectiveGap: gap,
+		EffectiveGap: opt.Gap,
+		DayGap:       opt.DayGap,
 		SourceFound:  true,
 	}, nil
 }
@@ -306,6 +355,78 @@ func hasTable(db *sql.DB, name string) bool {
 	var n int
 	err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?`, name).Scan(&n)
 	return err == nil && n > 0
+}
+
+// allocateDays spreads each billable day proportionally to each session's
+// effective time. Internal projects are excluded from both the day and the
+// allocation.
+func allocateDays(sessions map[string]*sessionInfo, order []string, opt Options) {
+	dayTimes := map[string][]int64{}
+	sumEff := map[string]time.Duration{}
+	for _, id := range order {
+		info := sessions[id]
+		name := domain.ProjectName(info.dir)
+		if opt.isInternal(info.dir, name) {
+			continue
+		}
+		for day, b := range info.days {
+			dayTimes[day] = append(dayTimes[day], b.times...)
+			sumEff[day] += b.effective
+		}
+	}
+
+	active := map[string]time.Duration{}
+	for day, times := range dayTimes {
+		active[day] = activeDuration(times, opt.DayGap)
+	}
+
+	allocated := map[string]time.Duration{}
+	var largest map[string]*dayBucket
+	for _, id := range order {
+		info := sessions[id]
+		name := domain.ProjectName(info.dir)
+		if opt.isInternal(info.dir, name) {
+			continue
+		}
+		for day, b := range info.days {
+			total := active[day]
+			if total <= 0 || sumEff[day] <= 0 {
+				continue
+			}
+			b.allocated = time.Duration(math.Round(float64(b.effective) * float64(total) / float64(sumEff[day])))
+			allocated[day] += b.allocated
+			if largest == nil {
+				largest = map[string]*dayBucket{}
+			}
+			if cur := largest[day]; cur == nil || b.effective > cur.effective {
+				largest[day] = b
+			}
+		}
+	}
+
+	// Keep the per-day sum exactly equal to the active day after rounding.
+	for day, total := range active {
+		if b := largest[day]; b != nil {
+			b.allocated += total - allocated[day]
+		}
+	}
+}
+
+// activeDuration sums the gaps between consecutive timestamps that do not
+// exceed gap. Timestamps are sorted in place.
+func activeDuration(times []int64, gap time.Duration) time.Duration {
+	if len(times) < 2 {
+		return 0
+	}
+	sort.Slice(times, func(i, j int) bool { return times[i] < times[j] })
+	gapMs := gap.Milliseconds()
+	var total int64
+	for i := 1; i < len(times); i++ {
+		if d := times[i] - times[i-1]; d > 0 && d <= gapMs {
+			total += d
+		}
+	}
+	return time.Duration(total) * time.Millisecond
 }
 
 // loadSource reads sessions and messages. When roleFromType is true the message
@@ -391,6 +512,7 @@ func loadSource(db *sql.DB, query string, roleFromType bool, sessions map[string
 			}
 		}
 		bucket.lastMsg = start
+		bucket.times = append(bucket.times, start)
 		bucket.tokens = bucket.tokens.Add(tok)
 		bucket.cost += cost
 	}
@@ -413,7 +535,7 @@ func (s *Store) Segments(f Filter) ([]domain.Segment, error) {
 		       COALESCE(o.start_ms, sd.start_ms), COALESCE(o.end_ms, sd.end_ms),
 		       CASE WHEN o.session_id IS NULL THEN 0 ELSE 1 END,
 		       sd.tokens_input, sd.tokens_output, sd.tokens_reasoning,
-		       sd.tokens_cache_read, sd.tokens_cache_write, sd.cost, sd.effective_ms
+		       sd.tokens_cache_read, sd.tokens_cache_write, sd.cost, sd.effective_ms, sd.allocated_ms
 		FROM session_day sd
 		LEFT JOIN time_override o ON o.session_id = sd.session_id AND o.day = sd.day
 		` + where + `
@@ -430,16 +552,18 @@ func (s *Store) Segments(f Filter) ([]domain.Segment, error) {
 			startMs, endMs int64
 			edited         int
 			effectiveMs    int64
+			allocatedMs    int64
 		)
 		if err := rows.Scan(&seg.SessionID, &seg.Day, &seg.Project, &seg.ProjectName, &seg.Title,
 			&startMs, &endMs, &edited, &seg.Tokens.Input, &seg.Tokens.Output, &seg.Tokens.Reasoning,
-			&seg.Tokens.CacheRead, &seg.Tokens.CacheWrite, &seg.Cost, &effectiveMs); err != nil {
+			&seg.Tokens.CacheRead, &seg.Tokens.CacheWrite, &seg.Cost, &effectiveMs, &allocatedMs); err != nil {
 			return nil, err
 		}
 		seg.Start = time.UnixMilli(startMs).Local()
 		seg.End = time.UnixMilli(endMs).Local()
 		seg.Edited = edited == 1
 		seg.Effective = time.Duration(effectiveMs) * time.Millisecond
+		seg.Allocated = time.Duration(allocatedMs) * time.Millisecond
 		if d := seg.End.Sub(seg.Start); seg.Effective > d {
 			seg.Effective = d
 		}
@@ -577,6 +701,13 @@ func (s *Store) Stats() (Stats, error) {
 		st.EffectiveGap = time.Duration(v) * time.Millisecond
 	} else {
 		st.EffectiveGap = DefaultEffectiveGap
+	}
+	var dayGapMS string
+	_ = s.db.QueryRow(`SELECT value FROM meta WHERE key='day_gap_ms'`).Scan(&dayGapMS)
+	if v, err := strconv.ParseInt(dayGapMS, 10, 64); err == nil && v > 0 {
+		st.DayGap = time.Duration(v) * time.Millisecond
+	} else {
+		st.DayGap = DefaultDayGap
 	}
 	if st.Source != "" {
 		if _, err := os.Stat(st.Source); err == nil {

@@ -75,7 +75,7 @@ func TestSyncQueryAndOverrides(t *testing.T) {
 	}
 	defer st.Close()
 
-	stats, err := st.Sync(src, 15*time.Minute)
+	stats, err := st.Sync(src, Options{Gap: 15 * time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +144,7 @@ func TestSyncQueryAndOverrides(t *testing.T) {
 	if err := st.UpdateTimes(target.SessionID, target.Day, start, end); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.Sync(src, 15*time.Minute); err != nil {
+	if _, err := st.Sync(src, Options{Gap: 15 * time.Minute}); err != nil {
 		t.Fatal(err)
 	}
 	after, err := st.Segments(Filter{Days: []string{"2026-10-26"}})
@@ -227,7 +227,7 @@ func TestSyncPrefersV2Schema(t *testing.T) {
 	}
 	defer st.Close()
 
-	stats, err := st.Sync(src, 15*time.Minute)
+	stats, err := st.Sync(src, Options{Gap: 15 * time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -279,7 +279,7 @@ func TestFilterProjectAndMonth(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	if _, err := st.Sync(src, 15*time.Minute); err != nil {
+	if _, err := st.Sync(src, Options{Gap: 15 * time.Minute}); err != nil {
 		t.Fatal(err)
 	}
 	segs, err := st.Segments(Filter{Month: "2026-10", Project: "alpha"})
@@ -345,7 +345,7 @@ func TestEffectiveTime(t *testing.T) {
 	}
 	defer st.Close()
 
-	if _, err := st.Sync(src, 15*time.Minute); err != nil {
+	if _, err := st.Sync(src, Options{Gap: 15 * time.Minute}); err != nil {
 		t.Fatal(err)
 	}
 	segs, err := st.Segments(Filter{Days: []string{"2026-11-10"}})
@@ -363,7 +363,7 @@ func TestEffectiveTime(t *testing.T) {
 		t.Fatalf("duration = %v, want 65m", got)
 	}
 
-	if _, err := st.Sync(src, 30*time.Minute); err != nil {
+	if _, err := st.Sync(src, Options{Gap: 30 * time.Minute}); err != nil {
 		t.Fatal(err)
 	}
 	wide, err := st.Segments(Filter{Days: []string{"2026-11-10"}})
@@ -391,5 +391,47 @@ func TestEffectiveTime(t *testing.T) {
 	}
 	if stats.EffectiveGap != 30*time.Minute {
 		t.Fatalf("stats gap = %v, want 30m", stats.EffectiveGap)
+	}
+}
+
+func TestAllocateDays(t *testing.T) {
+	base := time.Date(2026, 11, 23, 9, 0, 0, 0, time.Local).UnixMilli()
+	at := func(min int) int64 { return base + int64(min)*60000 }
+	bucket := func(eff time.Duration, mins ...int) *dayBucket {
+		b := &dayBucket{effective: eff}
+		for _, m := range mins {
+			b.times = append(b.times, at(m))
+		}
+		return b
+	}
+	makeSessions := func() map[string]*sessionInfo {
+		return map[string]*sessionInfo{
+			"a": {dir: "/home/admin/Proyectos/alpha", days: map[string]*dayBucket{
+				"2026-11-23": bucket(10*time.Minute, 0, 5, 10),
+			}},
+			"b": {dir: "/home/admin/Proyectos/beta", days: map[string]*dayBucket{
+				"2026-11-23": bucket(5*time.Minute, 12, 17),
+			}},
+		}
+	}
+
+	sessions := makeSessions()
+	allocateDays(sessions, []string{"a", "b"}, Options{DayGap: 5 * time.Minute})
+	a := sessions["a"].days["2026-11-23"].allocated
+	b := sessions["b"].days["2026-11-23"].allocated
+	if a+b != 17*time.Minute {
+		t.Fatalf("allocated sum = %v, want 17m", a+b)
+	}
+	if a <= b {
+		t.Fatalf("alpha (%v) should get more than beta (%v)", a, b)
+	}
+
+	internal := makeSessions()
+	allocateDays(internal, []string{"a", "b"}, Options{DayGap: 5 * time.Minute, Internal: []string{"beta"}})
+	if got := internal["a"].days["2026-11-23"].allocated; got != 10*time.Minute {
+		t.Fatalf("alpha allocated = %v, want 10m", got)
+	}
+	if got := internal["b"].days["2026-11-23"].allocated; got != 0 {
+		t.Fatalf("internal beta allocated = %v, want 0", got)
 	}
 }

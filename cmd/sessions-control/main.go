@@ -39,6 +39,8 @@ func run() error {
 		monthFlag   = flag.String("month", "", "mes YYYY-MM")
 		project     = flag.String("project", "", "proyecto (nombre o ruta)")
 		gapFlag     = flag.Int("gap", 0, "minutos máximos entre mensajes para el tiempo efectivo (0 = 15)")
+		dayGapFlag  = flag.Int("day-gap", 0, "minutos máximos entre mensajes para la jornada y el reparto (0 = 5)")
+		internal    = flag.String("internal", "", "proyectos internos excluidos del reparto (coma)")
 		exportFlag  = flag.String("export", "", "exportar: xlsx o pdf")
 		outFlag     = flag.String("out", "", "ruta del archivo exportado")
 		printFlag   = flag.Bool("print", false, "imprimir la tabla por stdout y salir")
@@ -68,6 +70,12 @@ func run() error {
 	if *gapFlag > 0 {
 		cfg.EffectiveGap = time.Duration(*gapFlag) * time.Minute
 	}
+	if *dayGapFlag > 0 {
+		cfg.DayGap = time.Duration(*dayGapFlag) * time.Minute
+	}
+	if *internal != "" {
+		cfg.Internal = splitCSV(*internal)
+	}
 	if err := cfg.EnsureDirs(); err != nil {
 		return err
 	}
@@ -81,7 +89,8 @@ func run() error {
 	interactive := !*printFlag && *exportFlag == ""
 
 	if !*noSync {
-		stats, err := st.Sync(cfg.SourceDB, cfg.EffectiveGap)
+		opt := store.Options{Gap: cfg.EffectiveGap, DayGap: cfg.DayGap, Internal: cfg.Internal}
+		stats, err := st.Sync(cfg.SourceDB, opt)
 		if err != nil {
 			if interactive {
 				fmt.Fprintln(os.Stderr, "aviso: no se pudo sincronizar:", err)
@@ -108,8 +117,13 @@ func run() error {
 	if effGap <= 0 {
 		effGap = cfg.EffectiveGap
 	}
-	if *noSync && *gapFlag > 0 && effGap != cfg.EffectiveGap {
-		fmt.Fprintln(os.Stderr, "aviso: -gap requiere sincronizar; se usa el valor guardado")
+	dayGap := stats.DayGap
+	if dayGap <= 0 {
+		dayGap = cfg.DayGap
+	}
+	if *noSync && (*gapFlag > 0 || *dayGapFlag > 0 || *internal != "") &&
+		(effGap != cfg.EffectiveGap || dayGap != cfg.DayGap || *internal != "") {
+		fmt.Fprintln(os.Stderr, "aviso: -gap, -day-gap y -internal requieren sincronizar; se usan los valores guardados")
 	}
 
 	if *printFlag || *exportFlag != "" {
@@ -125,7 +139,7 @@ func run() error {
 		if err != nil {
 			return err
 		}
-		rep := report.Build(view, segs, filter.Describe(), effGap)
+		rep := report.Build(view, segs, filter.Describe(), effGap, dayGap)
 
 		if *printFlag {
 			printReport(rep)
@@ -187,6 +201,16 @@ func buildFilter(days, from, to, month, project string) (store.Filter, error) {
 		}
 	}
 	return f, nil
+}
+
+func splitCSV(s string) []string {
+	var out []string
+	for _, part := range strings.Split(s, ",") {
+		if p := strings.TrimSpace(part); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func printReport(r report.Report) {

@@ -114,3 +114,22 @@
 - Smoke real 2026-11-23: lamostradevalencia.com 9,47 h → 5,31 h efectivas (umbral 15 min).
 - `make test` y `make vet` OK; XLSX y PDF generados y legibles.
 - Instalado en `~/.local/bin/sessions-control` con `make install-local`.
+
+## 2026-11-24 — Reparto de jornada entre proyectos
+- Causa: sumar `effective` entre sesiones solapadas da 12-16 h en días de 6 h. El efectivo es por sesión; no debe sumarse.
+- `internal/store/store.go`:
+  - nueva columna `session_day.allocated_ms` (migración automática).
+  - `Options{Gap, DayGap, Internal}` y `Sync(source, Options)`.
+  - jornada por día = huecos entre mensajes de proyectos **no internos** ≤ `day_gap` (5 min por defecto).
+  - `allocated_i = effective_i × jornada / Σ effective`; la suma diaria se ajusta a la jornada.
+  - proyectos internos (nombre o ruta) quedan con reparto 0 y fuera del cómputo.
+  - `Stats.DayGap`; meta `day_gap_ms`.
+- `internal/config/config.go`: `DayGap`, `Internal`; env `SESSIONS_CONTROL_DAY_GAP`, `SESSIONS_CONTROL_INTERNAL`.
+- `internal/domain/domain.go`: `Allocated` + `SumAllocated`.
+- `internal/report/report.go`: columna «Reparto» en las 4 vistas, totales y resumen.
+- `internal/tui/*`: columna, umbral en cabecera y ayuda.
+- `internal/export/*`: «Reparto» en Excel (hoja + Detalle), «Horas repartidas» en Resumen y PDF.
+- `cmd/sessions-control/main.go`: flags `-day-gap` y `-internal`.
+- Tests: `TestAllocateDays` (proporción, suma exacta, exclusión de internos); ajustados `TestEffectiveTime` y `TestViewShowsEffectiveColumn`.
+- Smoke 2026-11-23 con `-internal "web-efects,md-editor"`: efectivo 16,02 h → reparto **6,40 h** (La Mostra 3,00 h, Muniva 3,21 h, Olesa 0,19 h).
+- `make test` y `make vet` OK; XLSX y PDF verificados.

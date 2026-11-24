@@ -40,14 +40,14 @@ session_day(
   start_ms, end_ms,
   tokens_input, tokens_output, tokens_reasoning,
   tokens_cache_read, tokens_cache_write, cost,
-  effective_ms,
+  effective_ms, allocated_ms,
   PK(session_id, day)
 )
 time_override(
   session_id, day, start_ms, end_ms, updated_ms,
   PK(session_id, day)
 )
-meta(key, value)  -- source, synced_at, effective_gap_ms
+meta(key, value)  -- source, synced_at, effective_gap_ms, day_gap_ms
 ```
 
 ## 6. Reglas de cálculo
@@ -58,7 +58,13 @@ meta(key, value)  -- source, synced_at, effective_gap_ms
 - Sesión sin mensajes: un tramo con `time_created`..`time_updated`.
 - `worked`: suma de duraciones de los tramos (solapes contados).
 - `unique`: unión de intervalos [start,end] del conjunto mostrado.
-- `effective`: suma de los huecos entre mensajes consecutivos que no superan `gap` (por defecto 15 min, flag `-gap`). Descarta pausas largas, cortes de red y esperas; nunca supera la duración del tramo (se recorta tras una edición manual).
+- `effective`: suma de los huecos entre mensajes consecutivos que no superan `gap` (por defecto 15 min, flag `-gap`). Descarta pausas largas, cortes de red y esperas; nunca supera la duración del tramo (se recorta tras una edición manual). Es una métrica por sesión y no debe sumarse entre sesiones solapadas.
+- `allocated`: reparto de la jornada real entre proyectos facturables, proporcional a `effective`.
+  - Jornada = huecos entre mensajes de proyectos no internos que no superan `day_gap` (5 min por defecto, flag `-day-gap`).
+  - `allocated_i = effective_i × jornada / Σ effective` de los proyectos facturables del día.
+  - Proyectos internos (`-internal`, por nombre o ruta) quedan fuera del cómputo y su reparto es 0. `global` y `sessions-control` son siempre internos.
+  - La suma de `allocated` de un día es exactamente la jornada (se corrige el redondeo en el tramo mayor).
+  - No se recorta al editar horas: el reparto mide la jornada, no el tramo.
 - Filtro: los tramos se seleccionan por `day`; nunca se recorta un tramo.
 - Edición: `time_override` prevalece sobre `session_day`; se conserva al re-sincronizar.
 - Totales:
@@ -67,11 +73,12 @@ meta(key, value)  -- source, synced_at, effective_gap_ms
   - Único por grupo (proyecto/mes) = unión dentro del grupo; la fila TOTAL es la unión global.
 
 ## 7. Vistas
-- **Sesiones**: una fila por sesión y día. Columnas: fecha, inicio, fin, horas, efectivo, proyecto, sesión, tokens, coste. Editable.
-- **Proyectos**: agregado por `project`. Inicio/fin, sesiones, días, worked, efectivo, único, tokens, coste.
+- **Sesiones**: una fila por sesión y día. Columnas: fecha, inicio, fin, horas, efectivo, reparto, proyecto, sesión, tokens, coste. Editable.
+- **Proyectos**: agregado por `project`. Inicio/fin, sesiones, días, worked, efectivo, reparto, único, tokens, coste.
 - **Meses**: agregado por `YYYY-MM`.
 - **Días**: agregado por `YYYY-MM-DD`.
 - `efectivo` en grupos es la suma de los tramos (como `worked`), no una unión de intervalos.
+- `reparto` en grupos es la suma de los tramos; en un día completo coincide con la jornada facturable.
 
 ## 8. Filtros
 - Sintaxis TUI/CLI:
@@ -106,11 +113,11 @@ sessions-control                     # TUI
 sessions-control -print -days ...    # tabla por stdout
 sessions-control -export xlsx|pdf -view ... -from ... -to ... -out ...
 ```
-Flags: `-source`, `-db`, `-exports`, `-no-sync`, `-view`, `-days`, `-from`, `-to`, `-month`, `-project`, `-gap`, `-out`, `-reset-overrides`, `-version`.
+Flags: `-source`, `-db`, `-exports`, `-no-sync`, `-view`, `-days`, `-from`, `-to`, `-month`, `-project`, `-gap`, `-day-gap`, `-internal`, `-out`, `-reset-overrides`, `-version`.
 
 ## 12. Configuración
 - Flags > variables de entorno > defaults.
-- Variables: `SESSIONS_CONTROL_SOURCE`, `SESSIONS_CONTROL_DB`, `SESSIONS_CONTROL_EXPORTS`, `SESSIONS_CONTROL_GAP` (minutos).
+- Variables: `SESSIONS_CONTROL_SOURCE`, `SESSIONS_CONTROL_DB`, `SESSIONS_CONTROL_EXPORTS`, `SESSIONS_CONTROL_GAP` (minutos), `SESSIONS_CONTROL_DAY_GAP` (minutos), `SESSIONS_CONTROL_INTERNAL` (lista separada por comas).
 
 ## 13. Estructura
 ```
@@ -138,5 +145,7 @@ logs/                   state-changes.md
 - Un tramo no se parte al filtrar por día (pertenece al día de su `start`).
 - `unique` global no es la suma de `unique` por grupo.
 - `effective` se calcula en el sync con los timestamps de `session_message`; no se recorta al cruzar medianoche.
-- Gap por defecto 15 min; se guarda en `meta.effective_gap_ms` y cambiarlo exige re-sync.
+- `allocated` se calcula en el sync; depende de `day_gap`, de la lista de internos y de los efectivos del día.
+- Gap por defecto 15 min y day-gap 5 min; se guardan en `meta` y cambiarlos exige re-sync.
+- No hay tope de jornada: el reparto usa la actividad real del día (4 h un día, 8 h otro).
 - SQLite local derivada; reconstruible con `s`/`-no-sync=false`.
