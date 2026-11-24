@@ -39,6 +39,8 @@ func (m *Model) View() string {
 		lines = append(lines, m.filterModal()...)
 	case modeEdit:
 		lines = append(lines, m.editModal()...)
+	case modeRate:
+		lines = append(lines, m.rateModal()...)
 	case modeHelp:
 		lines = append(lines, m.helpModal()...)
 	default:
@@ -99,6 +101,7 @@ func (m *Model) headerLines() []string {
 	if dayGap := m.dayGap(); dayGap > 0 {
 		sourceLine += styleDim.Render(fmt.Sprintf("   ·   Reparto: ≤ %s", formatGap(dayGap)))
 	}
+	sourceLine += styleDim.Render("   ·   Tarifa: " + formatRate(m.rate) + " €/h")
 	return []string{first, filterLine, sourceLine}
 }
 
@@ -152,21 +155,21 @@ func (m *Model) columns() []col {
 	var rights []bool
 	switch m.view {
 	case report.ViewProjects:
-		titles = []string{"Proyecto", "Fact.", "Inicio", "Fin", "Ses.", "Días", "Horas", "Efectivo", "Reparto", "Único", "Tokens", "Coste"}
-		weights = []float64{3.4, 0.9, 1.25, 1.25, 1.2, 0.95, 1.2, 1.3, 1.3, 1.2, 1.9, 1.5}
-		rights = []bool{false, false, false, false, true, true, true, true, true, true, true, true}
+		titles = []string{"Proyecto", "Fact.", "Inicio", "Fin", "Ses.", "Días", "Horas", "Efectivo", "Reparto", "Importe", "Único", "Tokens", "Coste"}
+		weights = []float64{3.2, 0.9, 1.2, 1.2, 1.1, 0.9, 1.15, 1.25, 1.25, 1.4, 1.2, 1.8, 1.45}
+		rights = []bool{false, false, false, false, true, true, true, true, true, true, true, true, true}
 	case report.ViewMonths:
-		titles = []string{"Mes", "Ses.", "Días", "Horas", "Efectivo", "Reparto", "Único", "Tokens", "Coste"}
-		weights = []float64{2.8, 1.7, 1.3, 1.6, 1.6, 1.6, 1.6, 2.2, 1.7}
-		rights = []bool{false, true, true, true, true, true, true, true, true}
+		titles = []string{"Mes", "Ses.", "Días", "Horas", "Efectivo", "Reparto", "Importe", "Único", "Tokens", "Coste"}
+		weights = []float64{2.8, 1.6, 1.2, 1.5, 1.5, 1.5, 1.7, 1.5, 2.1, 1.6}
+		rights = []bool{false, true, true, true, true, true, true, true, true, true}
 	case report.ViewDays:
-		titles = []string{"Fecha", "Ses.", "Horas", "Efectivo", "Reparto", "Único", "Tokens", "Coste"}
-		weights = []float64{2.8, 1.7, 1.6, 1.6, 1.6, 1.6, 2.2, 1.7}
-		rights = []bool{false, true, true, true, true, true, true, true}
+		titles = []string{"Fecha", "Ses.", "Horas", "Efectivo", "Reparto", "Importe", "Único", "Tokens", "Coste"}
+		weights = []float64{2.8, 1.6, 1.5, 1.5, 1.5, 1.7, 1.5, 2.1, 1.6}
+		rights = []bool{false, true, true, true, true, true, true, true, true}
 	default:
-		titles = []string{"Fecha", "Inicio", "Fin", "Horas", "Efectivo", "Reparto", "Proyecto", "Sesión", "Tokens", "Coste"}
-		weights = []float64{2.0, 1.25, 1.25, 1.2, 1.3, 1.3, 3.0, 8.5, 2.1, 1.7}
-		rights = []bool{false, false, false, true, true, true, false, false, true, true}
+		titles = []string{"Fecha", "Inicio", "Fin", "Horas", "Efectivo", "Reparto", "Importe", "Proyecto", "Sesión", "Tokens", "Coste"}
+		weights = []float64{2.0, 1.2, 1.2, 1.15, 1.25, 1.25, 1.35, 2.8, 7.0, 2.0, 1.65}
+		rights = []bool{false, false, false, true, true, true, true, false, false, true, true}
 	}
 	var total float64
 	for _, w := range weights {
@@ -304,7 +307,7 @@ func countSessions(r report.Report) int {
 }
 
 func (m *Model) footerLine() string {
-	keys := "1-4 vistas · ↑↓ mover · ←→ día · f filtro · t/y/w/m fechas · e editar · r restaurar · i facturable · s sync · x Excel · p PDF · ? ayuda · q salir"
+	keys := "1-4 vistas · ↑↓ mover · ←→ día · f filtro · t/y/w/m fechas · e editar · r restaurar · i facturable · v tarifa · s sync · x Excel · p PDF · ? ayuda · q salir"
 	return styleDim.Render(padLine(" "+keys, m.width))
 }
 
@@ -355,6 +358,21 @@ func (m *Model) editModal() []string {
 	return strings.Split(box, "\n")
 }
 
+func (m *Model) rateModal() []string {
+	lines := []string{
+		styleTitle.Render("Tarifa horaria"),
+		"",
+		"Precio por hora facturable. Se aplica al reparto de todos los proyectos.",
+		"",
+		m.rateInput.View(),
+		"",
+		styleDim.Render("Ejemplo: 19,00 · se guarda en la base local"),
+		"Enter guardar   ·   Esc cancelar",
+	}
+	box := styleBox.Width(66).Render(strings.Join(lines, "\n"))
+	return strings.Split(box, "\n")
+}
+
 func (m *Model) helpModal() []string {
 	lines := []string{
 		styleTitle.Render("Ayuda"),
@@ -371,6 +389,7 @@ func (m *Model) helpModal() []string {
 		"e                Editar inicio/fin (vista Sesiones)",
 		"r                Restaurar las horas originales",
 		"i                Marcar facturable / interno (vista Proyectos)",
+		"v                Ajustar la tarifa horaria (€/h)",
 		"s                Sincronizar con opencode.db",
 		"x                Exportar la vista actual a Excel",
 		"p                Exportar la vista actual a PDF",
@@ -380,6 +399,7 @@ func (m *Model) helpModal() []string {
 		"",
 		styleDim.Render("Efectivo = huecos entre mensajes ≤ " + formatGap(m.gap()) + " (-gap N)."),
 		styleDim.Render("Reparto = jornada facturable; marca proyectos internos con i en la vista Proyectos."),
+		styleDim.Render("Importe = reparto × tarifa horaria (v)."),
 		"",
 		"Esc / ? / Enter  cerrar ayuda",
 	}

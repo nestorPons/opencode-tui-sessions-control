@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,6 +24,7 @@ const (
 	modeList mode = iota
 	modeFilter
 	modeEdit
+	modeRate
 	modeHelp
 )
 
@@ -43,6 +45,8 @@ type Model struct {
 	editEnd     textinput.Model
 	editFocus   int
 	editTarget  domain.Segment
+	rate        float64
+	rateInput   textinput.Model
 	status      string
 	isError     bool
 	busy        string
@@ -78,6 +82,17 @@ func New(st *store.Store, cfg config.Config, stats store.Stats) *Model {
 	ee.Width = 12
 	ee.Prompt = "Fin:    "
 
+	ri := textinput.New()
+	ri.Placeholder = "19,00"
+	ri.CharLimit = 12
+	ri.Width = 12
+	ri.Prompt = "€/h: "
+
+	rate := stats.Rate
+	if rate <= 0 {
+		rate = store.DefaultRate
+	}
+
 	m := &Model{
 		st:          st,
 		cfg:         cfg,
@@ -89,6 +104,8 @@ func New(st *store.Store, cfg config.Config, stats store.Stats) *Model {
 		filterInput: fi,
 		editStart:   es,
 		editEnd:     ee,
+		rate:        rate,
+		rateInput:   ri,
 	}
 	m.reload()
 	m.cursor = 0
@@ -103,9 +120,12 @@ func (m *Model) reload() {
 		m.isError = true
 		return
 	}
-	m.rep = report.Build(m.view, segs, m.filter.Describe(), m.gap(), m.dayGap())
+	m.rep = report.Build(m.view, segs, m.filter.Describe(), m.gap(), m.dayGap(), m.rate)
 	if st, err := m.st.Stats(); err == nil {
 		m.stats = st
+		if st.Rate > 0 {
+			m.rate = st.Rate
+		}
 	}
 	m.clamp()
 }
@@ -172,6 +192,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.stats = msg.stats
+		if msg.stats.Rate > 0 {
+			m.rate = msg.stats.Rate
+		}
 		m.reload()
 		if m.pending != "" {
 			m.status = m.pending
@@ -197,6 +220,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.mode == modeEdit {
 			return m.updateEdit(msg)
+		}
+		if m.mode == modeRate {
+			return m.updateRate(msg)
 		}
 		if m.mode == modeHelp {
 			switch msg.String() {
@@ -272,6 +298,9 @@ func (m *Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "i":
 		return m.toggleInternal()
+	case "v":
+		m.startRate()
+		return m, textinput.Blink
 	case "x":
 		m.busy = "Generando Excel..."
 		return m, m.exportCmd("xlsx")
@@ -438,6 +467,66 @@ func (m *Model) resetTimes() {
 	m.ensureVisible()
 	m.status = "Horas restauradas al valor original"
 	m.isError = false
+}
+
+// startRate opens the hourly-rate editor with the current value.
+func (m *Model) startRate() {
+	m.rateInput.SetValue(fmt.Sprintf("%.2f", m.rate))
+	m.rateInput.CursorEnd()
+	m.rateInput.Focus()
+	m.mode = modeRate
+	m.isError = false
+}
+
+// updateRate saves the hourly rate typed by the user.
+func (m *Model) updateRate(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.mode = modeList
+		m.rateInput.Blur()
+		return m, nil
+	case "enter":
+		rate, err := parseRate(m.rateInput.Value())
+		if err != nil {
+			m.status = err.Error()
+			m.isError = true
+			m.rateInput.Focus()
+			return m, textinput.Blink
+		}
+		if err := m.st.SetRate(rate); err != nil {
+			m.status = err.Error()
+			m.isError = true
+			m.rateInput.Focus()
+			return m, textinput.Blink
+		}
+		m.rate = rate
+		m.mode = modeList
+		m.rateInput.Blur()
+		m.reload()
+		m.status = "Tarifa: " + formatRate(rate) + " €/h"
+		m.isError = false
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.rateInput, cmd = m.rateInput.Update(msg)
+	return m, cmd
+}
+
+// parseRate accepts "19", "19,5" and "19,50 €/h".
+func parseRate(s string) (float64, error) {
+	s = strings.ReplaceAll(s, ",", ".")
+	s = strings.ReplaceAll(s, "€", "")
+	s = strings.ReplaceAll(s, "/h", "")
+	s = strings.TrimSpace(s)
+	v, err := strconv.ParseFloat(s, 64)
+	if err != nil || v <= 0 || v > 100000 {
+		return 0, fmt.Errorf("tarifa no válida; usa por ejemplo 19,00")
+	}
+	return v, nil
+}
+
+func formatRate(v float64) string {
+	return strings.ReplaceAll(fmt.Sprintf("%.2f", v), ".", ",")
 }
 
 // toggleInternal marks or unmarks the selected project as internal and

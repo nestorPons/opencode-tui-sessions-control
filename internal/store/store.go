@@ -66,6 +66,9 @@ const DefaultEffectiveGap = 15 * time.Minute
 // DefaultDayGap is the maximum pause between messages still counted in the day.
 const DefaultDayGap = 5 * time.Minute
 
+// DefaultRate is the fallback hourly rate in euros when none is stored.
+const DefaultRate = 19.0
+
 // Options configures the sync and the effective/allocated time rules.
 type Options struct {
 	Gap      time.Duration // per-session pause threshold
@@ -107,6 +110,7 @@ type Stats struct {
 	Overrides    int
 	EffectiveGap time.Duration
 	DayGap       time.Duration
+	Rate         float64
 	SourceFound  bool
 }
 
@@ -373,6 +377,7 @@ func (s *Store) Sync(source string, opt Options) (Stats, error) {
 		Segments:     segments,
 		EffectiveGap: opt.Gap,
 		DayGap:       opt.DayGap,
+		Rate:         s.rate(),
 		SourceFound:  true,
 	}, nil
 }
@@ -551,6 +556,29 @@ func loadSource(db *sql.DB, query string, roleFromType bool, sessions map[string
 func setMeta(tx *sql.Tx, key, value string) {
 	_, _ = tx.Exec(`INSERT INTO meta(key,value) VALUES(?,?)
 		ON CONFLICT(key) DO UPDATE SET value=excluded.value`, key, value)
+}
+
+// rate returns the stored hourly rate, or DefaultRate.
+func (s *Store) rate() float64 {
+	var raw string
+	_ = s.db.QueryRow(`SELECT value FROM meta WHERE key='rate_cents'`).Scan(&raw)
+	if v, err := strconv.Atoi(raw); err == nil && v > 0 {
+		return float64(v) / 100
+	}
+	return DefaultRate
+}
+
+// SetRate stores the hourly billing rate in euros.
+func (s *Store) SetRate(euros float64) error {
+	if euros <= 0 || euros > 100000 {
+		return fmt.Errorf("tarifa no válida: %.2f", euros)
+	}
+	cents := strconv.FormatInt(int64(euros*100+0.5), 10)
+	if _, err := s.db.Exec(`INSERT INTO meta(key,value) VALUES('rate_cents',?)
+		ON CONFLICT(key) DO UPDATE SET value=excluded.value`, cents); err != nil {
+		return fmt.Errorf("save rate: %w", err)
+	}
+	return nil
 }
 
 // SetInternal marks a project as internal (excluded from the allocation).
@@ -774,6 +802,7 @@ func (s *Store) Stats() (Stats, error) {
 	} else {
 		st.DayGap = DefaultDayGap
 	}
+	st.Rate = s.rate()
 	if st.Source != "" {
 		if _, err := os.Stat(st.Source); err == nil {
 			st.SourceFound = true

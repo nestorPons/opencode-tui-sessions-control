@@ -1,11 +1,15 @@
 package tui
 
 import (
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/nestorpons/sessions-control/internal/config"
 	"github.com/nestorpons/sessions-control/internal/domain"
 	"github.com/nestorpons/sessions-control/internal/report"
 	"github.com/nestorpons/sessions-control/internal/store"
@@ -93,7 +97,7 @@ func TestViewShowsEffectiveColumn(t *testing.T) {
 		Title: "una sesión", Start: day, End: day.Add(2 * time.Hour),
 		Effective: 90 * time.Minute, Allocated: 60 * time.Minute,
 	}}
-	rep := report.Build(report.ViewSessions, segs, "test", 15*time.Minute, 5*time.Minute)
+	rep := report.Build(report.ViewSessions, segs, "test", 15*time.Minute, 5*time.Minute, 19)
 	m := &Model{
 		width: 140, height: 30, view: report.ViewSessions, rep: rep,
 		stats: store.Stats{EffectiveGap: 15 * time.Minute, DayGap: 5 * time.Minute},
@@ -126,5 +130,72 @@ func TestToggleInternalBlocksSystemProjects(t *testing.T) {
 	}
 	if !m.isError || m.status != "global es siempre interno" {
 		t.Fatalf("status = %q, error = %v", m.status, m.isError)
+	}
+}
+
+func TestParseRate(t *testing.T) {
+	cases := map[string]float64{
+		"19":         19,
+		"19,5":       19.5,
+		"19.50":      19.5,
+		"19,50 €/h":  19.5,
+		" 22.75 /h ": 22.75,
+	}
+	for in, want := range cases {
+		got, err := parseRate(in)
+		if err != nil || got != want {
+			t.Fatalf("parseRate(%q) = %v, %v; want %v", in, got, err, want)
+		}
+	}
+	for _, in := range []string{"", "0", "-1", "abc"} {
+		if _, err := parseRate(in); err == nil {
+			t.Fatalf("parseRate(%q) should fail", in)
+		}
+	}
+}
+
+func TestViewShowsImporteColumn(t *testing.T) {
+	day := time.Date(2026, 11, 23, 9, 0, 0, 0, time.Local)
+	segs := []domain.Segment{{
+		SessionID: "s1", Day: "2026-11-23", Project: "/tmp/p", ProjectName: "p",
+		Title: "una sesión", Start: day, End: day.Add(4 * time.Hour),
+		Effective: 4 * time.Hour, Allocated: 4 * time.Hour,
+	}}
+	rep := report.Build(report.ViewProjects, segs, "test", 15*time.Minute, 5*time.Minute, 19)
+	m := &Model{
+		width: 160, height: 30, view: report.ViewProjects, rep: rep, rate: 19,
+		stats: store.Stats{EffectiveGap: 15 * time.Minute, DayGap: 5 * time.Minute, Rate: 19},
+	}
+	out := m.View()
+	if !strings.Contains(out, "Importe") || !strings.Contains(out, "76,00") {
+		t.Fatalf("view has no Importe column/value:\n%s", out)
+	}
+	if !strings.Contains(out, "Tarifa: 19,00 €/h") {
+		t.Fatalf("view has no rate note:\n%s", out)
+	}
+}
+
+func TestRateEditorPersists(t *testing.T) {
+	st, err := store.New(filepath.Join(t.TempDir(), "app.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	m := New(st, config.Config{}, store.Stats{EffectiveGap: 15 * time.Minute, DayGap: 5 * time.Minute, Rate: 19})
+	m.startRate()
+	if m.mode != modeRate {
+		t.Fatal("rate editor did not open")
+	}
+	m.rateInput.SetValue("22,50")
+	m.updateRate(tea.KeyMsg{Type: tea.KeyEnter})
+	if m.mode != modeList || m.rate != 22.5 {
+		t.Fatalf("mode = %v, rate = %v", m.mode, m.rate)
+	}
+	stats, err := st.Stats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Rate != 22.5 {
+		t.Fatalf("stored rate = %v, want 22.5", stats.Rate)
 	}
 }

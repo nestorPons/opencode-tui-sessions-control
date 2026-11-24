@@ -139,7 +139,7 @@ func run() error {
 		if err != nil {
 			return err
 		}
-		rep := report.Build(view, segs, filter.Describe(), effGap, dayGap)
+		rep := report.Build(view, segs, filter.Describe(), effGap, dayGap, stats.Rate)
 
 		if *printFlag {
 			printReport(rep)

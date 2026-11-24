@@ -115,7 +115,7 @@ func truncate(pdf *fpdf.Fpdf, s string, max float64) string {
 
 func isNumericHeader(h string) bool {
 	switch strings.ToLower(h) {
-	case "horas", "efectivo", "reparto", "únicO", "unico", "tokens", "coste", "sesiones", "días", "dias":
+	case "horas", "efectivo", "reparto", "importe", "únicO", "unico", "tokens", "coste", "sesiones", "días", "dias":
 		return true
 	}
 	return false
@@ -124,12 +124,12 @@ func isNumericHeader(h string) bool {
 func columnWeights(v report.View) []float64 {
 	switch v {
 	case report.ViewProjects:
-		return []float64{3.4, 0.9, 1.25, 1.25, 1.2, 0.95, 1.2, 1.3, 1.3, 1.2, 1.9, 1.5}
+		return []float64{3.2, 0.85, 1.15, 1.15, 1.05, 0.85, 1.1, 1.2, 1.2, 1.35, 1.15, 1.8, 1.4}
 	case report.ViewMonths:
-		return []float64{2.8, 1.7, 1.3, 1.6, 1.6, 1.6, 1.6, 2.2, 1.7}
+		return []float64{2.7, 1.55, 1.2, 1.45, 1.45, 1.45, 1.65, 1.45, 2.0, 1.55}
 	case report.ViewDays:
-		return []float64{2.8, 1.7, 1.6, 1.6, 1.6, 1.6, 2.2, 1.7}
+		return []float64{2.7, 1.55, 1.45, 1.45, 1.45, 1.65, 1.45, 2.0, 1.55}
 	default:
-		return []float64{1.9, 1.2, 1.2, 1.2, 1.3, 1.3, 3.0, 6.6, 2.1, 1.6}
+		return []float64{1.9, 1.15, 1.15, 1.1, 1.2, 1.2, 1.3, 2.8, 6.4, 1.95, 1.55}
 	}
 }

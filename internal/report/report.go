@@ -3,6 +3,7 @@ package report
 import (
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/nestorpons/sessions-control/internal/domain"
@@ -44,86 +45,97 @@ type Report struct {
 	Raw       []domain.Segment
 }
 
-func Build(view View, segs []domain.Segment, filterDesc string, gap, dayGap time.Duration) Report {
+func Build(view View, segs []domain.Segment, filterDesc string, gap, dayGap time.Duration, rate float64) Report {
 	r := Report{View: view, Filter: filterDesc, Raw: segs}
 	switch view {
 	case ViewProjects:
 		groups := domain.AggregateByProject(segs)
 		r.Title = "Totales por proyecto"
-		r.Headers = []string{"Proyecto", "Fact.", "Inicio", "Fin", "Sesiones", "Días", "Horas", "Efectivo", "Reparto", "Único", "Tokens", "Coste"}
+		r.Headers = []string{"Proyecto", "Fact.", "Inicio", "Fin", "Sesiones", "Días", "Horas", "Efectivo", "Reparto", "Importe", "Único", "Tokens", "Coste"}
 		for _, g := range groups {
 			r.Rows = append(r.Rows, []string{
 				g.Label, fact(g.Internal), clock(g.Start), clock(g.End), itoa(g.Sessions), itoa(g.Days),
-				hours(g.Worked), hours(g.Effective), hours(g.Allocated), hours(g.Unique),
-				tokens(g.Tokens.Total()), money(g.Cost),
+				hours(g.Worked), hours(g.Effective), hours(g.Allocated), euros(billing(g.Allocated, rate)),
+				hours(g.Unique), tokens(g.Tokens.Total()), money(g.Cost),
 			})
 			r.Data = append(r.Data, []any{
 				g.Label, fact(g.Internal), clock(g.Start), clock(g.End), g.Sessions, g.Days,
-				hoursFloat(g.Worked), hoursFloat(g.Effective), hoursFloat(g.Allocated), hoursFloat(g.Unique),
-				g.Tokens.Total(), round(g.Cost),
+				hoursFloat(g.Worked), hoursFloat(g.Effective), hoursFloat(g.Allocated), billing(g.Allocated, rate),
+				hoursFloat(g.Unique), g.Tokens.Total(), round(g.Cost),
 			})
 		}
 		r.Totals = []string{"TOTAL", "", "", "", itoa(countSessions(segs)), itoa(domain.DistinctDays(segs)),
 			hours(domain.SumDurations(segs)), hours(domain.SumEffective(segs)), hours(domain.SumAllocated(segs)),
-			hours(domain.UniqueDuration(segs)), tokens(sumTokens(segs).Total()), money(sumCost(segs))}
+			euros(billing(domain.SumAllocated(segs), rate)), hours(domain.UniqueDuration(segs)),
+			tokens(sumTokens(segs).Total()), money(sumCost(segs))}
 		r.TotalData = []any{"TOTAL", "", "", "", countSessions(segs), domain.DistinctDays(segs),
 			hoursFloat(domain.SumDurations(segs)), hoursFloat(domain.SumEffective(segs)), hoursFloat(domain.SumAllocated(segs)),
-			hoursFloat(domain.UniqueDuration(segs)), sumTokens(segs).Total(), round(sumCost(segs))}
-		r.Summary = fmt.Sprintf("%s · %s · %s trabajadas · %s efectivas · %s repartidas · %s únicas",
+			billing(domain.SumAllocated(segs), rate), hoursFloat(domain.UniqueDuration(segs)),
+			sumTokens(segs).Total(), round(sumCost(segs))}
+		r.Summary = fmt.Sprintf("%s · %s · %s trabajadas · %s efectivas · %s repartidas · %s · %s únicas",
 			plural(len(groups), "proyecto", "proyectos"), plural(countSessions(segs), "sesión", "sesiones"),
 			humanDuration(domain.SumDurations(segs)), humanDuration(domain.SumEffective(segs)),
-			humanDuration(domain.SumAllocated(segs)), humanDuration(domain.UniqueDuration(segs))) + rulesNote(gap, dayGap)
+			humanDuration(domain.SumAllocated(segs)), euros(billing(domain.SumAllocated(segs), rate)),
+			humanDuration(domain.UniqueDuration(segs))) + rulesNote(gap, dayGap)
 	case ViewMonths:
 		groups := domain.AggregateByMonth(segs)
 		r.Title = "Totales por mes"
-		r.Headers = []string{"Mes", "Sesiones", "Días", "Horas", "Efectivo", "Reparto", "Único", "Tokens", "Coste"}
+		r.Headers = []string{"Mes", "Sesiones", "Días", "Horas", "Efectivo", "Reparto", "Importe", "Único", "Tokens", "Coste"}
 		for _, g := range groups {
 			r.Rows = append(r.Rows, []string{
 				g.Label, itoa(g.Sessions), itoa(g.Days), hours(g.Worked), hours(g.Effective),
-				hours(g.Allocated), hours(g.Unique), tokens(g.Tokens.Total()), money(g.Cost),
+				hours(g.Allocated), euros(billing(g.Allocated, rate)), hours(g.Unique),
+				tokens(g.Tokens.Total()), money(g.Cost),
 			})
 			r.Data = append(r.Data, []any{
 				g.Label, g.Sessions, g.Days, hoursFloat(g.Worked), hoursFloat(g.Effective),
-				hoursFloat(g.Allocated), hoursFloat(g.Unique), g.Tokens.Total(), round(g.Cost),
+				hoursFloat(g.Allocated), billing(g.Allocated, rate), hoursFloat(g.Unique),
+				g.Tokens.Total(), round(g.Cost),
 			})
 		}
 		r.Totals = []string{"TOTAL", itoa(countSessions(segs)), itoa(domain.DistinctDays(segs)),
 			hours(domain.SumDurations(segs)), hours(domain.SumEffective(segs)), hours(domain.SumAllocated(segs)),
-			hours(domain.UniqueDuration(segs)), tokens(sumTokens(segs).Total()), money(sumCost(segs))}
+			euros(billing(domain.SumAllocated(segs), rate)), hours(domain.UniqueDuration(segs)),
+			tokens(sumTokens(segs).Total()), money(sumCost(segs))}
 		r.TotalData = []any{"TOTAL", countSessions(segs), domain.DistinctDays(segs),
 			hoursFloat(domain.SumDurations(segs)), hoursFloat(domain.SumEffective(segs)), hoursFloat(domain.SumAllocated(segs)),
-			hoursFloat(domain.UniqueDuration(segs)), sumTokens(segs).Total(), round(sumCost(segs))}
-		r.Summary = fmt.Sprintf("%s · %s trabajadas · %s efectivas · %s repartidas · %s únicas",
+			billing(domain.SumAllocated(segs), rate), hoursFloat(domain.UniqueDuration(segs)),
+			sumTokens(segs).Total(), round(sumCost(segs))}
+		r.Summary = fmt.Sprintf("%s · %s trabajadas · %s efectivas · %s repartidas · %s · %s únicas",
 			plural(len(groups), "mes", "meses"),
 			humanDuration(domain.SumDurations(segs)), humanDuration(domain.SumEffective(segs)),
-			humanDuration(domain.SumAllocated(segs)), humanDuration(domain.UniqueDuration(segs))) + rulesNote(gap, dayGap)
+			humanDuration(domain.SumAllocated(segs)), euros(billing(domain.SumAllocated(segs), rate)),
+			humanDuration(domain.UniqueDuration(segs))) + rulesNote(gap, dayGap)
 	case ViewDays:
 		groups := domain.AggregateByDay(segs)
 		r.Title = "Totales por día"
-		r.Headers = []string{"Fecha", "Sesiones", "Horas", "Efectivo", "Reparto", "Único", "Tokens", "Coste"}
+		r.Headers = []string{"Fecha", "Sesiones", "Horas", "Efectivo", "Reparto", "Importe", "Único", "Tokens", "Coste"}
 		for _, g := range groups {
 			r.Rows = append(r.Rows, []string{
 				g.Label, itoa(g.Sessions), hours(g.Worked), hours(g.Effective), hours(g.Allocated),
-				hours(g.Unique), tokens(g.Tokens.Total()), money(g.Cost),
+				euros(billing(g.Allocated, rate)), hours(g.Unique), tokens(g.Tokens.Total()), money(g.Cost),
 			})
 			r.Data = append(r.Data, []any{
 				g.Label, g.Sessions, hoursFloat(g.Worked), hoursFloat(g.Effective), hoursFloat(g.Allocated),
-				hoursFloat(g.Unique), g.Tokens.Total(), round(g.Cost),
+				billing(g.Allocated, rate), hoursFloat(g.Unique), g.Tokens.Total(), round(g.Cost),
 			})
 		}
 		r.Totals = []string{"TOTAL", itoa(countSessions(segs)), hours(domain.SumDurations(segs)),
-			hours(domain.SumEffective(segs)), hours(domain.SumAllocated(segs)), hours(domain.UniqueDuration(segs)),
+			hours(domain.SumEffective(segs)), hours(domain.SumAllocated(segs)),
+			euros(billing(domain.SumAllocated(segs), rate)), hours(domain.UniqueDuration(segs)),
 			tokens(sumTokens(segs).Total()), money(sumCost(segs))}
 		r.TotalData = []any{"TOTAL", countSessions(segs), hoursFloat(domain.SumDurations(segs)),
-			hoursFloat(domain.SumEffective(segs)), hoursFloat(domain.SumAllocated(segs)), hoursFloat(domain.UniqueDuration(segs)),
+			hoursFloat(domain.SumEffective(segs)), hoursFloat(domain.SumAllocated(segs)),
+			billing(domain.SumAllocated(segs), rate), hoursFloat(domain.UniqueDuration(segs)),
 			sumTokens(segs).Total(), round(sumCost(segs))}
-		r.Summary = fmt.Sprintf("%s · %s trabajadas · %s efectivas · %s repartidas · %s únicas",
+		r.Summary = fmt.Sprintf("%s · %s trabajadas · %s efectivas · %s repartidas · %s · %s únicas",
 			plural(len(groups), "día", "días"),
 			humanDuration(domain.SumDurations(segs)), humanDuration(domain.SumEffective(segs)),
-			humanDuration(domain.SumAllocated(segs)), humanDuration(domain.UniqueDuration(segs))) + rulesNote(gap, dayGap)
+			humanDuration(domain.SumAllocated(segs)), euros(billing(domain.SumAllocated(segs), rate)),
+			humanDuration(domain.UniqueDuration(segs))) + rulesNote(gap, dayGap)
 	default:
 		r.Title = "Sesiones (una fila por sesión y día)"
-		r.Headers = []string{"Fecha", "Inicio", "Fin", "Horas", "Efectivo", "Reparto", "Proyecto", "Sesión", "Tokens", "Coste"}
+		r.Headers = []string{"Fecha", "Inicio", "Fin", "Horas", "Efectivo", "Reparto", "Importe", "Proyecto", "Sesión", "Tokens", "Coste"}
 		for _, s := range segs {
 			start, end := clock(s.Start), clock(s.End)
 			if s.Edited {
@@ -132,21 +144,24 @@ func Build(view View, segs []domain.Segment, filterDesc string, gap, dayGap time
 			}
 			r.Rows = append(r.Rows, []string{
 				s.Day, start, end, hours(s.Duration()), hours(s.Effective), hours(s.Allocated),
-				s.ProjectName, s.Title, tokens(s.Tokens.Total()), money(s.Cost),
+				euros(billing(s.Allocated, rate)), s.ProjectName, s.Title, tokens(s.Tokens.Total()), money(s.Cost),
 			})
 			r.Data = append(r.Data, []any{
 				s.Day, start, end, hoursFloat(s.Duration()), hoursFloat(s.Effective), hoursFloat(s.Allocated),
-				s.ProjectName, s.Title, s.Tokens.Total(), round(s.Cost),
+				billing(s.Allocated, rate), s.ProjectName, s.Title, s.Tokens.Total(), round(s.Cost),
 			})
 		}
 		r.Totals = []string{"TOTAL", "", "", hours(domain.SumDurations(segs)), hours(domain.SumEffective(segs)),
-			hours(domain.SumAllocated(segs)), "", "", tokens(sumTokens(segs).Total()), money(sumCost(segs))}
+			hours(domain.SumAllocated(segs)), euros(billing(domain.SumAllocated(segs), rate)), "", "",
+			tokens(sumTokens(segs).Total()), money(sumCost(segs))}
 		r.TotalData = []any{"TOTAL", "", "", hoursFloat(domain.SumDurations(segs)), hoursFloat(domain.SumEffective(segs)),
-			hoursFloat(domain.SumAllocated(segs)), "", "", sumTokens(segs).Total(), round(sumCost(segs))}
-		r.Summary = fmt.Sprintf("%s · %s · %s trabajadas · %s efectivas · %s repartidas · %s únicas",
+			hoursFloat(domain.SumAllocated(segs)), billing(domain.SumAllocated(segs), rate), "", "",
+			sumTokens(segs).Total(), round(sumCost(segs))}
+		r.Summary = fmt.Sprintf("%s · %s · %s trabajadas · %s efectivas · %s repartidas · %s · %s únicas",
 			plural(countSessions(segs), "sesión", "sesiones"), plural(len(segs), "tramo", "tramos"),
 			humanDuration(domain.SumDurations(segs)), humanDuration(domain.SumEffective(segs)),
-			humanDuration(domain.SumAllocated(segs)), humanDuration(domain.UniqueDuration(segs))) + rulesNote(gap, dayGap)
+			humanDuration(domain.SumAllocated(segs)), euros(billing(domain.SumAllocated(segs), rate)),
+			humanDuration(domain.UniqueDuration(segs))) + rulesNote(gap, dayGap)
 	}
 	return r
 }
@@ -200,6 +215,16 @@ func tokens(n int64) string {
 }
 
 func money(f float64) string { return fmt.Sprintf("%.4f", f) }
+
+// billing converts an allocated duration to euros at the hourly rate.
+func billing(d time.Duration, rate float64) float64 {
+	return float64(int64(hoursFloat(d)*rate*100+0.5)) / 100
+}
+
+// euros renders an amount with a Spanish decimal comma.
+func euros(v float64) string {
+	return strings.ReplaceAll(fmt.Sprintf("%.2f", v), ".", ",") + " €"
+}
 
 func round(f float64) float64 { return float64(int64(f*10000+0.5)) / 10000 }
 

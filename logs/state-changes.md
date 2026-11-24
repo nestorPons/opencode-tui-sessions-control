@@ -147,3 +147,15 @@
 - Tests: `TestProjectFlags` (persistencia y sync), `TestToggleInternalBlocksSystemProjects` y `TestAllocateDays` con `project_meta`.
 - Smoke: web-efects y md-editor marcados internos → total 6,40 h; La Mostra 3,00 h, Muniva 3,21 h.
 - `make test` y `make vet` OK.
+
+## 2026-11-24 — Importe facturable y tarifa horaria
+- Causa: el reparto en horas no dice cuánto facturar; la tarifa no debe depender de variables de entorno.
+- `internal/store/store.go`: `rate_cents` en `meta`; `SetRate` (valida > 0), `rate()`, `Stats.Rate`, `Sync` devuelve la tarifa guardada; `DefaultRate = 19 €/h`.
+- `internal/report/report.go`: columna «Importe» en las cuatro vistas, totales y resumen; `Build` recibe `rate`; `billing` y `euros` (coma decimal).
+- `internal/tui/model.go`: modo `modeRate`, tecla `v`, `parseRate` (acepta `19`, `19,5`, `19,50 €/h`), persistencia y recarga.
+- `internal/tui/render.go`: modal de tarifa, columna Importe, cabecera `Tarifa: 19,00 €/h`, ayuda y pie.
+- `internal/export/excel.go`: estilo de 2 decimales para Importe, columna en Detalle y filas Tarifa/Importe en Resumen.
+- `internal/export/pdf.go`: Importe numérico y pesos de las cuatro vistas.
+- Tests: `TestBuildImporte`, `TestParseRate`, `TestViewShowsImporteColumn`, `TestRateEditorPersists`, `TestRate`.
+- Smoke 2026-11-23: 6,40 h repartidas → 121,64 € a 19 €/h.
+- `make test` y `make vet` OK.

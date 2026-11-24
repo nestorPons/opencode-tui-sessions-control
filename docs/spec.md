@@ -48,7 +48,7 @@ time_override(
   PK(session_id, day)
 )
 project_meta(path, internal)  -- facturable (0) / interno (1)
-meta(key, value)  -- source, synced_at, effective_gap_ms, day_gap_ms
+meta(key, value)  -- source, synced_at, effective_gap_ms, day_gap_ms, rate_cents
 ```
 
 ## 6. Reglas de cálculo
@@ -66,6 +66,7 @@ meta(key, value)  -- source, synced_at, effective_gap_ms, day_gap_ms
   - Proyectos internos quedan fuera del cómputo y su reparto es 0. Se marcan con `i` en la vista Proyectos (tabla `project_meta`, persistente) o con `-internal` (nombre o ruta). `global` y `sessions-control` son siempre internos y no se pueden alternar.
   - La suma de `allocated` de un día es exactamente la jornada (se corrige el redondeo en el tramo mayor).
   - No se recorta al editar horas: el reparto mide la jornada, no el tramo.
+- `importe` = `allocated × rate_cents / 100`; la tarifa es global y se edita con `v`. No depende del sync.
 - Filtro: los tramos se seleccionan por `day`; nunca se recorta un tramo.
 - Edición: `time_override` prevalece sobre `session_day`; se conserva al re-sincronizar.
 - Totales:
@@ -74,10 +75,10 @@ meta(key, value)  -- source, synced_at, effective_gap_ms, day_gap_ms
   - Único por grupo (proyecto/mes) = unión dentro del grupo; la fila TOTAL es la unión global.
 
 ## 7. Vistas
-- **Sesiones**: una fila por sesión y día. Columnas: fecha, inicio, fin, horas, efectivo, reparto, proyecto, sesión, tokens, coste. Editable.
-- **Proyectos**: agregado por `project`. Facturable (sí/no), inicio/fin, sesiones, días, worked, efectivo, reparto, único, tokens, coste. La tecla `i` alterna facturable/interno y recalcula el reparto.
-- **Meses**: agregado por `YYYY-MM`.
-- **Días**: agregado por `YYYY-MM-DD`.
+- **Sesiones**: una fila por sesión y día. Columnas: fecha, inicio, fin, horas, efectivo, reparto, importe, proyecto, sesión, tokens, coste. Editable.
+- **Proyectos**: agregado por `project`. Facturable (sí/no), inicio/fin, sesiones, días, worked, efectivo, reparto, importe, único, tokens, coste. La tecla `i` alterna facturable/interno y recalcula el reparto; `v` ajusta la tarifa horaria.
+- **Meses**: agregado por `YYYY-MM`, con importe del mes.
+- **Días**: agregado por `YYYY-MM-DD`, con importe del día.
 - `efectivo` en grupos es la suma de los tramos (como `worked`), no una unión de intervalos.
 - `reparto` en grupos es la suma de los tramos; en un día completo coincide con la jornada facturable.
 

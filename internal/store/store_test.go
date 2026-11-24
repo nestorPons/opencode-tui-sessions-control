@@ -514,3 +514,42 @@ func TestProjectFlags(t *testing.T) {
 		t.Fatalf("global must stay internal: internal=%v allocated=%v", global.Internal, global.Allocated)
 	}
 }
+
+func TestRate(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "app.db")
+	st, err := New(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stats, err := st.Stats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Rate != DefaultRate {
+		t.Fatalf("default rate = %v, want %v", stats.Rate, DefaultRate)
+	}
+	if err := st.SetRate(22.5); err != nil {
+		t.Fatal(err)
+	}
+	stats, _ = st.Stats()
+	if stats.Rate != 22.5 {
+		t.Fatalf("rate = %v, want 22.5", stats.Rate)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	st, err = New(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	stats, _ = st.Stats()
+	if stats.Rate != 22.5 {
+		t.Fatalf("persisted rate = %v, want 22.5", stats.Rate)
+	}
+	if err := st.SetRate(0); err == nil {
+		t.Fatal("rate 0 should fail")
+	}
+}
