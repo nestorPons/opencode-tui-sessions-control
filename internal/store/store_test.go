@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nestorpons/sessions-control/internal/domain"
+
 	_ "modernc.org/sqlite"
 )
 
@@ -416,7 +418,7 @@ func TestAllocateDays(t *testing.T) {
 	}
 
 	sessions := makeSessions()
-	allocateDays(sessions, []string{"a", "b"}, Options{DayGap: 5 * time.Minute})
+	allocateDays(sessions, []string{"a", "b"}, Options{DayGap: 5 * time.Minute}, nil)
 	a := sessions["a"].days["2026-11-23"].allocated
 	b := sessions["b"].days["2026-11-23"].allocated
 	if a+b != 17*time.Minute {
@@ -427,11 +429,88 @@ func TestAllocateDays(t *testing.T) {
 	}
 
 	internal := makeSessions()
-	allocateDays(internal, []string{"a", "b"}, Options{DayGap: 5 * time.Minute, Internal: []string{"beta"}})
+	allocateDays(internal, []string{"a", "b"}, Options{DayGap: 5 * time.Minute, Internal: []string{"beta"}}, nil)
 	if got := internal["a"].days["2026-11-23"].allocated; got != 10*time.Minute {
 		t.Fatalf("alpha allocated = %v, want 10m", got)
 	}
 	if got := internal["b"].days["2026-11-23"].allocated; got != 0 {
 		t.Fatalf("internal beta allocated = %v, want 0", got)
+	}
+
+	meta := makeSessions()
+	allocateDays(meta, []string{"a", "b"}, Options{DayGap: 5 * time.Minute}, map[string]bool{"/home/admin/Proyectos/beta": true})
+	if got := meta["a"].days["2026-11-23"].allocated; got != 10*time.Minute {
+		t.Fatalf("alpha allocated with meta flag = %v, want 10m", got)
+	}
+	if got := meta["b"].days["2026-11-23"].allocated; got != 0 {
+		t.Fatalf("beta with meta flag = %v, want 0", got)
+	}
+}
+
+func TestProjectFlags(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "opencode.db")
+	createSource(t, src)
+	st, err := New(filepath.Join(dir, "app.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if _, err := st.Sync(src, Options{Gap: 15 * time.Minute, DayGap: 15 * time.Minute}); err != nil {
+		t.Fatal(err)
+	}
+
+	find := func(project string) domain.Segment {
+		t.Helper()
+		segs, err := st.Segments(Filter{Days: []string{"2026-10-26"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, s := range segs {
+			if s.Project == project {
+				return s
+			}
+		}
+		t.Fatalf("project %q not found", project)
+		return domain.Segment{}
+	}
+
+	if find("/home/admin/Proyectos/alpha").Internal {
+		t.Fatal("alpha should start as billable")
+	}
+	if !find("/home/admin").Internal {
+		t.Fatal("global should start as internal")
+	}
+
+	if err := st.SetInternal("/home/admin/Proyectos/alpha", true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Sync(src, Options{Gap: 15 * time.Minute, DayGap: 15 * time.Minute}); err != nil {
+		t.Fatal(err)
+	}
+	alpha := find("/home/admin/Proyectos/alpha")
+	if !alpha.Internal || alpha.Allocated != 0 {
+		t.Fatalf("alpha after marking internal: internal=%v allocated=%v", alpha.Internal, alpha.Allocated)
+	}
+
+	if err := st.SetInternal("/home/admin/Proyectos/alpha", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Sync(src, Options{Gap: 15 * time.Minute, DayGap: 15 * time.Minute}); err != nil {
+		t.Fatal(err)
+	}
+	if find("/home/admin/Proyectos/alpha").Internal {
+		t.Fatal("alpha should be billable again")
+	}
+
+	if err := st.SetInternal("/home/admin", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Sync(src, Options{Gap: 15 * time.Minute, DayGap: 15 * time.Minute}); err != nil {
+		t.Fatal(err)
+	}
+	global := find("/home/admin")
+	if !global.Internal || global.Allocated != 0 {
+		t.Fatalf("global must stay internal: internal=%v allocated=%v", global.Internal, global.Allocated)
 	}
 }

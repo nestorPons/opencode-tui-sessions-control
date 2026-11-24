@@ -112,3 +112,19 @@ func TestViewShowsEffectiveColumn(t *testing.T) {
 		t.Fatalf("view has no effective/allocated value:\n%s", out)
 	}
 }
+
+func TestToggleInternalBlocksSystemProjects(t *testing.T) {
+	m := &Model{
+		view:   report.ViewProjects,
+		cursor: 0,
+		rep: report.Report{Raw: []domain.Segment{{
+			Project: "/home/admin", ProjectName: "global",
+		}}},
+	}
+	if _, cmd := m.toggleInternal(); cmd != nil {
+		t.Fatal("global must not trigger a sync")
+	}
+	if !m.isError || m.status != "global es siempre interno" {
+		t.Fatalf("status = %q, error = %v", m.status, m.isError)
+	}
+}

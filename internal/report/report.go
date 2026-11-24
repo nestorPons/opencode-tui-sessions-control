@@ -50,23 +50,23 @@ func Build(view View, segs []domain.Segment, filterDesc string, gap, dayGap time
 	case ViewProjects:
 		groups := domain.AggregateByProject(segs)
 		r.Title = "Totales por proyecto"
-		r.Headers = []string{"Proyecto", "Inicio", "Fin", "Sesiones", "Días", "Horas", "Efectivo", "Reparto", "Único", "Tokens", "Coste"}
+		r.Headers = []string{"Proyecto", "Fact.", "Inicio", "Fin", "Sesiones", "Días", "Horas", "Efectivo", "Reparto", "Único", "Tokens", "Coste"}
 		for _, g := range groups {
 			r.Rows = append(r.Rows, []string{
-				g.Label, clock(g.Start), clock(g.End), itoa(g.Sessions), itoa(g.Days),
+				g.Label, fact(g.Internal), clock(g.Start), clock(g.End), itoa(g.Sessions), itoa(g.Days),
 				hours(g.Worked), hours(g.Effective), hours(g.Allocated), hours(g.Unique),
 				tokens(g.Tokens.Total()), money(g.Cost),
 			})
 			r.Data = append(r.Data, []any{
-				g.Label, clock(g.Start), clock(g.End), g.Sessions, g.Days,
+				g.Label, fact(g.Internal), clock(g.Start), clock(g.End), g.Sessions, g.Days,
 				hoursFloat(g.Worked), hoursFloat(g.Effective), hoursFloat(g.Allocated), hoursFloat(g.Unique),
 				g.Tokens.Total(), round(g.Cost),
 			})
 		}
-		r.Totals = []string{"TOTAL", "", "", itoa(countSessions(segs)), itoa(domain.DistinctDays(segs)),
+		r.Totals = []string{"TOTAL", "", "", "", itoa(countSessions(segs)), itoa(domain.DistinctDays(segs)),
 			hours(domain.SumDurations(segs)), hours(domain.SumEffective(segs)), hours(domain.SumAllocated(segs)),
 			hours(domain.UniqueDuration(segs)), tokens(sumTokens(segs).Total()), money(sumCost(segs))}
-		r.TotalData = []any{"TOTAL", "", "", countSessions(segs), domain.DistinctDays(segs),
+		r.TotalData = []any{"TOTAL", "", "", "", countSessions(segs), domain.DistinctDays(segs),
 			hoursFloat(domain.SumDurations(segs)), hoursFloat(domain.SumEffective(segs)), hoursFloat(domain.SumAllocated(segs)),
 			hoursFloat(domain.UniqueDuration(segs)), sumTokens(segs).Total(), round(sumCost(segs))}
 		r.Summary = fmt.Sprintf("%s · %s · %s trabajadas · %s efectivas · %s repartidas · %s únicas",
@@ -171,6 +171,13 @@ func rulesNote(gap, dayGap time.Duration) string {
 		out += p
 	}
 	return " · " + out
+}
+
+func fact(internal bool) string {
+	if internal {
+		return "no"
+	}
+	return "sí"
 }
 
 func clock(t time.Time) string {

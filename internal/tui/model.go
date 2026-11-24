@@ -46,6 +46,7 @@ type Model struct {
 	status      string
 	isError     bool
 	busy        string
+	pending     string
 }
 
 type syncMsg struct {
@@ -165,13 +166,19 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case syncMsg:
 		m.busy = ""
 		if msg.err != nil {
+			m.pending = ""
 			m.status = "error al sincronizar: " + msg.err.Error()
 			m.isError = true
 			return m, nil
 		}
 		m.stats = msg.stats
 		m.reload()
-		m.status = fmt.Sprintf("Sincronizado: %d sesiones, %d tramos", msg.stats.Sessions, msg.stats.Segments)
+		if m.pending != "" {
+			m.status = m.pending
+			m.pending = ""
+		} else {
+			m.status = fmt.Sprintf("Sincronizado: %d sesiones, %d tramos", msg.stats.Sessions, msg.stats.Segments)
+		}
 		m.isError = false
 		return m, nil
 	case exportMsg:
@@ -263,6 +270,8 @@ func (m *Model) updateList(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "r":
 		m.resetTimes()
 		return m, nil
+	case "i":
+		return m.toggleInternal()
 	case "x":
 		m.busy = "Generando Excel..."
 		return m, m.exportCmd("xlsx")
@@ -429,6 +438,42 @@ func (m *Model) resetTimes() {
 	m.ensureVisible()
 	m.status = "Horas restauradas al valor original"
 	m.isError = false
+}
+
+// toggleInternal marks or unmarks the selected project as internal and
+// recalculates the allocation.
+func (m *Model) toggleInternal() (tea.Model, tea.Cmd) {
+	if m.view != report.ViewProjects {
+		m.status = "Cambia a Proyectos (2) para marcar facturable/interno"
+		m.isError = true
+		return m, nil
+	}
+	groups := domain.AggregateByProject(m.rep.Raw)
+	if m.cursor < 0 || m.cursor >= len(groups) {
+		m.status = "No hay ningún proyecto seleccionado"
+		m.isError = true
+		return m, nil
+	}
+	g := groups[m.cursor]
+	if name := domain.ProjectName(g.Key); name == "global" || name == "sessions-control" {
+		m.status = name + " es siempre interno"
+		m.isError = true
+		return m, nil
+	}
+	next := !g.Internal
+	if err := m.st.SetInternal(g.Key, next); err != nil {
+		m.status = err.Error()
+		m.isError = true
+		return m, nil
+	}
+	state := "facturable"
+	if next {
+		state = "interno"
+	}
+	m.pending = fmt.Sprintf("%s: %s · reparto recalculado", g.Label, state)
+	m.busy = "Recalculando reparto..."
+	m.isError = false
+	return m, m.syncCmd()
 }
 
 func (m *Model) syncCmd() tea.Cmd {

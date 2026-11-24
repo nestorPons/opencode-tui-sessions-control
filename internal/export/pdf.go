@@ -124,7 +124,7 @@ func isNumericHeader(h string) bool {
 func columnWeights(v report.View) []float64 {
 	switch v {
 	case report.ViewProjects:
-		return []float64{3.9, 1.3, 1.3, 1.3, 1.0, 1.3, 1.4, 1.4, 1.3, 2.0, 1.6}
+		return []float64{3.4, 0.9, 1.25, 1.25, 1.2, 0.95, 1.2, 1.3, 1.3, 1.2, 1.9, 1.5}
 	case report.ViewMonths:
 		return []float64{2.8, 1.7, 1.3, 1.6, 1.6, 1.6, 1.6, 2.2, 1.7}
 	case report.ViewDays:

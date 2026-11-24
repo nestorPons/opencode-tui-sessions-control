@@ -152,9 +152,9 @@ func (m *Model) columns() []col {
 	var rights []bool
 	switch m.view {
 	case report.ViewProjects:
-		titles = []string{"Proyecto", "Inicio", "Fin", "Ses.", "Días", "Horas", "Efectivo", "Reparto", "Único", "Tokens", "Coste"}
-		weights = []float64{3.9, 1.3, 1.3, 1.3, 1.0, 1.3, 1.4, 1.4, 1.3, 2.0, 1.6}
-		rights = []bool{false, false, false, true, true, true, true, true, true, true, true}
+		titles = []string{"Proyecto", "Fact.", "Inicio", "Fin", "Ses.", "Días", "Horas", "Efectivo", "Reparto", "Único", "Tokens", "Coste"}
+		weights = []float64{3.4, 0.9, 1.25, 1.25, 1.2, 0.95, 1.2, 1.3, 1.3, 1.2, 1.9, 1.5}
+		rights = []bool{false, false, false, false, true, true, true, true, true, true, true, true}
 	case report.ViewMonths:
 		titles = []string{"Mes", "Ses.", "Días", "Horas", "Efectivo", "Reparto", "Único", "Tokens", "Coste"}
 		weights = []float64{2.8, 1.7, 1.3, 1.6, 1.6, 1.6, 1.6, 2.2, 1.7}
@@ -304,7 +304,7 @@ func countSessions(r report.Report) int {
 }
 
 func (m *Model) footerLine() string {
-	keys := "1-4 vistas · ↑↓ mover · ←→ día · f filtro · t/y/w/m fechas · e editar · r restaurar · s sync · x Excel · p PDF · ? ayuda · q salir"
+	keys := "1-4 vistas · ↑↓ mover · ←→ día · f filtro · t/y/w/m fechas · e editar · r restaurar · i facturable · s sync · x Excel · p PDF · ? ayuda · q salir"
 	return styleDim.Render(padLine(" "+keys, m.width))
 }
 
@@ -370,6 +370,7 @@ func (m *Model) helpModal() []string {
 		"c                Quitar el filtro",
 		"e                Editar inicio/fin (vista Sesiones)",
 		"r                Restaurar las horas originales",
+		"i                Marcar facturable / interno (vista Proyectos)",
 		"s                Sincronizar con opencode.db",
 		"x                Exportar la vista actual a Excel",
 		"p                Exportar la vista actual a PDF",
@@ -378,7 +379,7 @@ func (m *Model) helpModal() []string {
 		"project=clowww.es · from=2026-10-01 to=2026-10-27 · ayer · semana · all",
 		"",
 		styleDim.Render("Efectivo = huecos entre mensajes ≤ " + formatGap(m.gap()) + " (-gap N)."),
-		styleDim.Render("Reparto = parte de la jornada facturable, sin contar proyectos internos (-internal)."),
+		styleDim.Render("Reparto = jornada facturable; marca proyectos internos con i en la vista Proyectos."),
 		"",
 		"Esc / ? / Enter  cerrar ayuda",
 	}

@@ -6,7 +6,7 @@ TUI en Go para auditar el tiempo y los tokens de tus sesiones de opencode.
 - Guarda agregados y horas editadas en `~/.local/share/sessions-control/sessions.db`.
 - Vistas por sesiones, proyectos, meses y días.
 - Tiempo efectivo: descuenta pausas y cortes (huecos entre mensajes mayores que `-gap`, 15 min por defecto).
-- Reparto: reparte la jornada real entre proyectos facturables, sin contar los internos (`-internal`). La suma del reparto es la jornada (6 h un día, 8 h otro), no la suma de efectivos.
+- Reparto: reparte la jornada real entre proyectos facturables. Marca los internos con `i` en la vista Proyectos (se guarda en la base local; `global` y `sessions-control` son siempre internos); la suma del reparto es la jornada, no la suma de efectivos.
 - Filtros por varios días, rango, mes o proyecto.
 - Edición de hora de inicio/fin por tramo (sesión/día).
 - Exportación con totales a Excel y PDF.
@@ -64,6 +64,7 @@ Atajos:
 | `c` | Quitar filtro |
 | `e` | Editar inicio/fin (vista Sesiones) |
 | `r` | Restaurar horas originales |
+| `i` | Marcar facturable / interno (vista Proyectos) |
 | `s` | Sincronizar con opencode.db |
 | `x` | Exportar Excel |
 | `p` | Exportar PDF |

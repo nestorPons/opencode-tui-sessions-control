@@ -34,7 +34,8 @@ make packages   # deb, rpm, apk, archlinux (requiere nfpm)
 - `sync` no borra overrides.
 - `unique` = unión de intervalos; `worked` = suma de duraciones.
 - `effective` = suma de huecos entre mensajes ≤ `gap`; se recalcula en cada sync y se recorta al tramo editado. No se suma entre sesiones solapadas.
-- `allocated` = `effective_i × jornada / Σ effective` de los proyectos no internos; la suma por día es la jornada. Depende de `-day-gap` y `-internal`, así que cambiarlos exige re-sync.
+- `allocated` = `effective_i × jornada / Σ effective` de los proyectos no internos; la suma por día es la jornada. Depende de `-day-gap`, de `project_meta` y de `-internal`; cambiarlos exige re-sync.
+- `project_meta` solo se escribe con `SetInternal` (tecla `i`); sync no lo borra.
 - Fila TOTAL de grupos = unión global, no suma de únicos por grupo.
 - Tokens solo de mensajes `assistant`.
 - Día y horas en `time.Local`.

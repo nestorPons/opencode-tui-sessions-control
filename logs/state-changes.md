@@ -133,3 +133,17 @@
 - Tests: `TestAllocateDays` (proporción, suma exacta, exclusión de internos); ajustados `TestEffectiveTime` y `TestViewShowsEffectiveColumn`.
 - Smoke 2026-11-23 con `-internal "web-efects,md-editor"`: efectivo 16,02 h → reparto **6,40 h** (La Mostra 3,00 h, Muniva 3,21 h, Olesa 0,19 h).
 - `make test` y `make vet` OK; XLSX y PDF verificados.
+
+## 2026-11-24 — Marcar facturable/interno desde el TUI
+- Causa: no usar variables de entorno ni archivos de sistema para clasificar proyectos.
+- `internal/store/store.go`: tabla `project_meta(path, internal)`; `SetInternal` y `projectMeta`; sync siembra `global` y `sessions-control` como internos la primera vez y no borra las marcas.
+- `internal/store/store.go`: `Segments` une `project_meta` y expone `Internal`.
+- `internal/domain/domain.go`: `Segment.Internal` y `Group.Internal`.
+- `internal/report/report.go`: columna «Fact.» (sí/no) en la vista Proyectos.
+- `internal/tui/model.go`: tecla `i` alterna facturable/interno del proyecto seleccionado y re-sincroniza.
+- `internal/tui/render.go`: columna, ayuda y pie.
+- `internal/export/pdf.go`: pesos de la vista Proyectos con la nueva columna.
+- `global` y `sessions-control` siguen siendo siempre internos: no se pueden alternar con `i`.
+- Tests: `TestProjectFlags` (persistencia y sync), `TestToggleInternalBlocksSystemProjects` y `TestAllocateDays` con `project_meta`.
+- Smoke: web-efects y md-editor marcados internos → total 6,40 h; La Mostra 3,00 h, Muniva 3,21 h.
+- `make test` y `make vet` OK.

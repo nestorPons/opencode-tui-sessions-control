@@ -39,6 +39,7 @@ type Segment struct {
 	Start       time.Time
 	End         time.Time
 	Edited      bool
+	Internal    bool
 	Effective   time.Duration // gaps <= EffectiveGap between messages
 	Allocated   time.Duration // proportional share of the real day
 	Tokens      Tokens
@@ -77,6 +78,7 @@ type Group struct {
 	Unique    time.Duration // union of intervals
 	Effective time.Duration // sum of effective time
 	Allocated time.Duration // sum of allocated time
+	Internal  bool          // every segment belongs to an internal project
 	Tokens    Tokens
 	Cost      float64
 }
@@ -319,6 +321,7 @@ func (g *Group) add(s Segment) {
 	g.Worked += s.Duration()
 	g.Effective += s.Effective
 	g.Allocated += s.Allocated
+	g.Internal = g.Internal || s.Internal
 	g.Tokens = g.Tokens.Add(s.Tokens)
 	g.Cost += s.Cost
 }

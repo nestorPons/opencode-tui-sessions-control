@@ -50,6 +50,10 @@ CREATE TABLE IF NOT EXISTS meta (
 	key   TEXT PRIMARY KEY,
 	value TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS project_meta (
+	path     TEXT PRIMARY KEY,
+	internal INTEGER NOT NULL DEFAULT 0
+);
 `
 
 type Store struct {
@@ -79,9 +83,12 @@ func (o Options) withDefaults() Options {
 	return o
 }
 
-func (o Options) isInternal(dir, name string) bool {
+func (o Options) isInternal(dir, name string, meta map[string]bool) bool {
 	// The app itself and sessions run from the home directory are never billable.
 	if name == "global" || name == "sessions-control" {
+		return true
+	}
+	if internal, ok := meta[dir]; ok && internal {
 		return true
 	}
 	for _, p := range o.Internal {
@@ -287,7 +294,26 @@ func (s *Store) Sync(source string, opt Options) (Stats, error) {
 		}
 	}
 
-	allocateDays(sessions, order, opt)
+	meta, err := s.projectMeta()
+	if err != nil {
+		return Stats{}, err
+	}
+	for _, id := range order {
+		info := sessions[id]
+		name := domain.ProjectName(info.dir)
+		if name != "global" && name != "sessions-control" {
+			continue
+		}
+		if _, ok := meta[info.dir]; ok {
+			continue
+		}
+		if err := s.SetInternal(info.dir, true); err != nil {
+			return Stats{}, err
+		}
+		meta[info.dir] = true
+	}
+
+	allocateDays(sessions, order, opt, meta)
 
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -360,13 +386,13 @@ func hasTable(db *sql.DB, name string) bool {
 // allocateDays spreads each billable day proportionally to each session's
 // effective time. Internal projects are excluded from both the day and the
 // allocation.
-func allocateDays(sessions map[string]*sessionInfo, order []string, opt Options) {
+func allocateDays(sessions map[string]*sessionInfo, order []string, opt Options, meta map[string]bool) {
 	dayTimes := map[string][]int64{}
 	sumEff := map[string]time.Duration{}
 	for _, id := range order {
 		info := sessions[id]
 		name := domain.ProjectName(info.dir)
-		if opt.isInternal(info.dir, name) {
+		if opt.isInternal(info.dir, name, meta) {
 			continue
 		}
 		for day, b := range info.days {
@@ -385,7 +411,7 @@ func allocateDays(sessions map[string]*sessionInfo, order []string, opt Options)
 	for _, id := range order {
 		info := sessions[id]
 		name := domain.ProjectName(info.dir)
-		if opt.isInternal(info.dir, name) {
+		if opt.isInternal(info.dir, name, meta) {
 			continue
 		}
 		for day, b := range info.days {
@@ -527,6 +553,38 @@ func setMeta(tx *sql.Tx, key, value string) {
 		ON CONFLICT(key) DO UPDATE SET value=excluded.value`, key, value)
 }
 
+// SetInternal marks a project as internal (excluded from the allocation).
+func (s *Store) SetInternal(path string, internal bool) error {
+	v := 0
+	if internal {
+		v = 1
+	}
+	if _, err := s.db.Exec(`INSERT INTO project_meta(path, internal) VALUES(?,?)
+		ON CONFLICT(path) DO UPDATE SET internal=excluded.internal`, path, v); err != nil {
+		return fmt.Errorf("save project flag: %w", err)
+	}
+	return nil
+}
+
+// projectMeta returns every project flag. true means internal.
+func (s *Store) projectMeta() (map[string]bool, error) {
+	rows, err := s.db.Query(`SELECT path, internal FROM project_meta`)
+	if err != nil {
+		return nil, fmt.Errorf("read project flags: %w", err)
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var path string
+		var internal int
+		if err := rows.Scan(&path, &internal); err != nil {
+			return nil, err
+		}
+		out[path] = internal == 1
+	}
+	return out, rows.Err()
+}
+
 // Segments returns the segments matching f, with manual times applied.
 func (s *Store) Segments(f Filter) ([]domain.Segment, error) {
 	where, args := f.clause()
@@ -535,9 +593,11 @@ func (s *Store) Segments(f Filter) ([]domain.Segment, error) {
 		       COALESCE(o.start_ms, sd.start_ms), COALESCE(o.end_ms, sd.end_ms),
 		       CASE WHEN o.session_id IS NULL THEN 0 ELSE 1 END,
 		       sd.tokens_input, sd.tokens_output, sd.tokens_reasoning,
-		       sd.tokens_cache_read, sd.tokens_cache_write, sd.cost, sd.effective_ms, sd.allocated_ms
+		       sd.tokens_cache_read, sd.tokens_cache_write, sd.cost, sd.effective_ms, sd.allocated_ms,
+		       COALESCE(pm.internal, 0)
 		FROM session_day sd
 		LEFT JOIN time_override o ON o.session_id = sd.session_id AND o.day = sd.day
+		LEFT JOIN project_meta pm ON pm.path = sd.project
 		` + where + `
 		ORDER BY COALESCE(o.start_ms, sd.start_ms)`
 	rows, err := s.db.Query(query, args...)
@@ -553,10 +613,11 @@ func (s *Store) Segments(f Filter) ([]domain.Segment, error) {
 			edited         int
 			effectiveMs    int64
 			allocatedMs    int64
+			internal       int
 		)
 		if err := rows.Scan(&seg.SessionID, &seg.Day, &seg.Project, &seg.ProjectName, &seg.Title,
 			&startMs, &endMs, &edited, &seg.Tokens.Input, &seg.Tokens.Output, &seg.Tokens.Reasoning,
-			&seg.Tokens.CacheRead, &seg.Tokens.CacheWrite, &seg.Cost, &effectiveMs, &allocatedMs); err != nil {
+			&seg.Tokens.CacheRead, &seg.Tokens.CacheWrite, &seg.Cost, &effectiveMs, &allocatedMs, &internal); err != nil {
 			return nil, err
 		}
 		seg.Start = time.UnixMilli(startMs).Local()
@@ -564,6 +625,10 @@ func (s *Store) Segments(f Filter) ([]domain.Segment, error) {
 		seg.Edited = edited == 1
 		seg.Effective = time.Duration(effectiveMs) * time.Millisecond
 		seg.Allocated = time.Duration(allocatedMs) * time.Millisecond
+		seg.Internal = internal == 1
+		if seg.ProjectName == "global" || seg.ProjectName == "sessions-control" {
+			seg.Internal = true
+		}
 		if d := seg.End.Sub(seg.Start); seg.Effective > d {
 			seg.Effective = d
 		}
